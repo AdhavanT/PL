@@ -43,7 +43,22 @@ typedef float f32;
 typedef double f64;
 //-----------------------------------------------
 
+struct PL_Timing
+{
+	uint64 cycles_per_second;
+	
+	uint64 current_cycles;
+	uint64 current_micros;
+	uint64 current_millis;
+	uint64 current_seconds;
+	f64 fcurrent_seconds;
 
+	uint64 delta_cycles;
+	uint64 delta_micros;
+	uint64 delta_millis;
+
+	f32 fdelta_seconds;
+};
 
 struct PL_Bitmap
 {
@@ -57,7 +72,7 @@ struct PL_Bitmap
 
 struct PL_Window
 {
-	b32 was_resized;
+	b32 was_altered;
 	int position_x;
 	int position_y;
 	int height;
@@ -69,6 +84,7 @@ struct PL
 {
 	b32 initialized;
 	b32 running;
+	PL_Timing time;
 	PL_Window window;
 	PL_Bitmap bitmap;
 	void* platform_specific;

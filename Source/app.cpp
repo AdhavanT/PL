@@ -4,12 +4,14 @@
 
 void PL_update(PL& pl)
 {
-	static int x = 0;
-	if (x % 1000)
+	uint32 *ptr = (uint32*)pl.bitmap.buffer;
+	for (int y = 0; y < 400; y++)
 	{
-		char ch[512];
-		sprintf_s(ch, "width:%d , height:%d , pos_x:%d, pos_y:%d \n", pl.window.width, pl.window.height, pl.window.position_x, pl.window.position_y);
-		OutputDebugStringA(ch);
+		for (int x = 0; x < 300; x++)
+		{
+			*ptr = 0xFF893722;
+			ptr++;
+		}
 	}
-	x++;
+
 }
