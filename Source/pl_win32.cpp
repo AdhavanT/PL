@@ -1,9 +1,12 @@
 #include <windows.h>
 #include <malloc.h>
 #include "pl.h"
+#include <stdio.h>
 
 struct Win32Specific
 {
+	BITMAPINFO bmi_header;
+	HDC main_monitor_DC;
 	HINSTANCE hInstance;
 	HWND wnd_handle;
 	void* main_fiber;
@@ -60,7 +63,8 @@ static void PL_initialize_window(PL& pl)
 	wnd_class.style = CS_VREDRAW | CS_HREDRAW;
 	wnd_class.hInstance = ((Win32Specific*)pl.platform_specific)->hInstance;
 
-	ASSERT(RegisterClassA(&wnd_class));
+	HRESULT s = RegisterClassA(&wnd_class);
+	ASSERT(s);
 
 	((Win32Specific*)pl.platform_specific)->wnd_handle = CreateWindowExA(
 		0,
@@ -88,7 +92,8 @@ static void PL_initialize_window(PL& pl)
 	((Win32Specific*)pl.platform_specific)->message_fiber = CreateFiber(0, (PFIBER_START_ROUTINE)wnd_message_fiber_proc, &pl);
 	ASSERT(((Win32Specific*)pl.platform_specific)->message_fiber);
 
-	//TODO: get and set device contex for opengl stuff maybe
+	((Win32Specific*)pl.platform_specific)->main_monitor_DC = GetDC(((Win32Specific*)pl.platform_specific)->wnd_handle);
+
 
 	PL_poll_window(pl);
 	
@@ -131,11 +136,15 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 	}
 	switch (uMsg)
 	{
+		case WM_MOVE:
+		{
+			pl->window.was_altered = TRUE;
+
+		}break;
+
 		case WM_SIZE:
 		{
-			
-			pl->window.was_resized = TRUE;
-			
+			pl->window.was_altered = TRUE;	
 		}break;
 
 		case WM_KEYUP:
@@ -174,8 +183,11 @@ void PL_poll_window(PL &pl)
 {
 	SwitchToFiber(((Win32Specific*)pl.platform_specific)->message_fiber);
 
-	if (pl.window.was_resized || (pl.initialized == FALSE))
+	if (pl.window.was_altered || (pl.initialized == FALSE))
 	{
+		//NOTE:not gettin device context every time window moves. Checked with multi-monitor setup, worked fine with single device context. 
+		//((Win32Specific*)pl.platform_specific)->main_monitor_DC = GetDC(((Win32Specific*)pl.platform_specific)->wnd_handle);
+
 		RECT client_rectangle = {};
 		GetClientRect(((Win32Specific*)pl.platform_specific)->wnd_handle, &client_rectangle);
 
@@ -188,12 +200,73 @@ void PL_poll_window(PL &pl)
 		pl.window.position_x = window_position.x;
 		pl.window.position_y = window_position.y;
 
-		pl.window.was_resized = false;
+		pl.window.was_altered = FALSE;
 	}
 	//TODO: get mouse input and stuff
 }
+ 
+//this updates the window by bliting the bitmap to the screen. So...sorta PL_push_bitmap() also.
+void PL_push_window(PL& pl)
+{
+	//Refreshing the FPS counter in the window title bar. Comment out to turn off. 
+	static f64 timing_refresh = 0;
+	if (pl.time.fcurrent_seconds - timing_refresh > 0.1)//refreshing at a tenth(0.1) of a second.
+	{
+		int32 frame_rate = (int32)(pl.time.cycles_per_second / pl.time.delta_cycles);
+		char buffer[256];
+		sprintf_s(buffer, "Time per frame: %.*fms , %dFPS\n",2, pl.time.fdelta_seconds * 1000, frame_rate);
+		SetWindowTextA(((Win32Specific*)pl.platform_specific)->wnd_handle, buffer);
+		timing_refresh = pl.time.fcurrent_seconds;
+	}
+
+	StretchDIBits(
+		((Win32Specific*)pl.platform_specific)->main_monitor_DC,
+		0, 0, pl.window.width, pl.window.height,
+		0, 0, pl.bitmap.width, pl.bitmap.height,
+		pl.bitmap.buffer,
+		&((Win32Specific*)pl.platform_specific)->bmi_header,
+		DIB_RGB_COLORS, SRCCOPY);
+}
+
 //-------------------------------</win32 window stuff>----------------------------------------
 
+//-------------------------------<timing stuff>-----------------------------------------------
+
+void PL_poll_timing(PL& pl)
+{
+	LARGE_INTEGER new_q; 
+	QueryPerformanceCounter(&new_q);
+
+	f64 tmp_cs;
+	uint64 tmp_cmil, tmp_cmic;
+
+	tmp_cs = (f64)new_q.QuadPart / (f64)pl.time.cycles_per_second;
+	tmp_cmil = (uint64)(tmp_cs * 1000);
+	tmp_cmic = (uint64)(tmp_cs * 1000000);
+
+	pl.time.delta_cycles = new_q.QuadPart - pl.time.current_cycles;
+	pl.time.delta_millis = tmp_cmil - pl.time.current_millis;
+	pl.time.delta_micros = tmp_cmic - pl.time.current_micros;
+
+	pl.time.fdelta_seconds = (new_q.QuadPart - pl.time.current_cycles) / (f32)pl.time.cycles_per_second;
+
+	pl.time.fcurrent_seconds = tmp_cs;
+	pl.time.current_cycles = new_q.QuadPart;
+	pl.time.current_seconds = (uint64)tmp_cs;
+	pl.time.current_millis = tmp_cmil;
+	pl.time.current_micros = tmp_cmic;
+}
+
+void PL_initialize_timing(PL& pl)
+{
+	LARGE_INTEGER frequency;
+	QueryPerformanceFrequency(&frequency);
+	pl.time.cycles_per_second = frequency.QuadPart;
+
+	PL_poll_timing(pl);	//To avoid the first frame having wierd 0 delta and current time values.
+}
+
+//-------------------------------</timing stuff>----------------------------------------------
 
 //-------------------------------<bitmap stuff>-----------------------------------------------
 static void PL_initialize_bitmap(PL& pl)
@@ -218,6 +291,15 @@ static void PL_initialize_bitmap(PL& pl)
 		pl.bitmap.buffer = malloc(pl.bitmap.size);
 	}
 	ASSERT(pl.bitmap.buffer);
+
+	BITMAPINFO* bmi = &((Win32Specific*)pl.platform_specific)->bmi_header;
+	bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
+	bmi->bmiHeader.biBitCount = 8 * pl.bitmap.bytes_per_pixel;
+	bmi->bmiHeader.biCompression = BI_RGB;
+	bmi->bmiHeader.biPlanes = 1;
+	bmi->bmiHeader.biHeight = pl.bitmap.height;
+	bmi->bmiHeader.biWidth = pl.bitmap.width;
+
 }
 //-------------------------------</bitmap stuff>-----------------------------------------------
 
@@ -236,7 +318,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 	pl.platform_specific = &pl_win32;
 
 	PL_initialize(pl);
-	pl.initialized = TRUE;
 	while (pl.running)
 	{
 		PL_poll(pl);
@@ -250,16 +331,20 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 void PL_initialize(PL& pl)
 {
 	pl.running = TRUE;
+	pl.initialized = FALSE;
+	PL_initialize_timing(pl);
 	PL_initialize_window(pl);
 	PL_initialize_bitmap(pl);
+	pl.initialized = TRUE;
 }
 
 void PL_poll(PL& pl)
 {
+	PL_poll_timing(pl);
 	PL_poll_window(pl);
 }
 
 void PL_push(PL &pl)
 {
-
+	PL_push_window(pl);
 }
