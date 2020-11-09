@@ -1,4 +1,6 @@
 #include <windows.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
 #include <malloc.h>
 #include "pl.h"
 #include <stdio.h>
@@ -15,10 +17,9 @@ struct Win32Specific
 
 
 //-------------------------------<win32 window stuff>----------------------------------------
-void PL_poll_window(PL& pl);
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);//actual win32 message callback
 void static CALLBACK wnd_message_fiber_proc(PL& pl);//for switching to fiber that handles processing message callbacks
-static void PL_initialize_window(PL& pl)
+void PL_initialize_window(PL& pl)
 {
 	int window_width, window_height;
 	if (pl.window.height == 0)	//uninitialized
@@ -64,7 +65,7 @@ static void PL_initialize_window(PL& pl)
 	wnd_class.hInstance = ((Win32Specific*)pl.platform_specific)->hInstance;
 
 	HRESULT s = RegisterClassA(&wnd_class);
-	ASSERT(s);
+	ASSERT(s != 0);
 
 	((Win32Specific*)pl.platform_specific)->wnd_handle = CreateWindowExA(
 		0,
@@ -99,7 +100,6 @@ static void PL_initialize_window(PL& pl)
 	
 
 }
-
 
 //a fiber to handle messages to keep main loop going while doing so.
 //A 1ms timer alerts the message callback when to switch to the main loop fiber.
@@ -219,9 +219,10 @@ void PL_push_window(PL& pl)
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
 
+	//NOTE:Making sure to keep the buffer to monitor pixel mapping consistant. (not stretching the image to fit window.)
 	StretchDIBits(
 		((Win32Specific*)pl.platform_specific)->main_monitor_DC,
-		0, 0, pl.window.width, pl.window.height,
+		0, 0, pl.bitmap.width, pl.bitmap.height,
 		0, 0, pl.bitmap.width, pl.bitmap.height,
 		pl.bitmap.buffer,
 		&((Win32Specific*)pl.platform_specific)->bmi_header,
@@ -231,7 +232,6 @@ void PL_push_window(PL& pl)
 //-------------------------------</win32 window stuff>----------------------------------------
 
 //-------------------------------<timing stuff>-----------------------------------------------
-
 void PL_poll_timing(PL& pl)
 {
 	LARGE_INTEGER new_q; 
@@ -269,7 +269,7 @@ void PL_initialize_timing(PL& pl)
 //-------------------------------</timing stuff>----------------------------------------------
 
 //-------------------------------<bitmap stuff>-----------------------------------------------
-static void PL_initialize_bitmap(PL& pl)
+void PL_initialize_bitmap(PL& pl)
 {
 	if (pl.bitmap.height == 0)	//uninitialized
 	{
@@ -303,9 +303,114 @@ static void PL_initialize_bitmap(PL& pl)
 }
 //-------------------------------</bitmap stuff>-----------------------------------------------
 
+//-------------------------------<Win32 Audio stuff>-------------------------------------------
+//NOTE: Input audio stream is in loopback mode. Audio streams are initialized by defaults. 
+void PL_initialize_audio(PL& pl)
+{
+	CoInitializeEx(0, COINIT_MULTITHREADED);	//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
+	IMMDeviceEnumerator* pEnumerator = 0;
+	IMMDevice* output_endpoint = 0;
+	IMMDevice* input_endpoint = 0;
+
+	IAudioClient* output_audio_client = 0;
+	IAudioClient* input_audio_client = 0;
+
+
+	HRESULT result;
+	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+	ASSERT(!FAILED(result));
+
+	result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &output_endpoint);
+	ASSERT(result == S_OK);
+
+	if (pl.audio.input.is_loopback)
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &input_endpoint);	//It's eRender instead of eCapture cause input is loopback.
+		ASSERT(result == S_OK);
+	}
+	else
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eCapture, eMultimedia, &input_endpoint);
+		ASSERT(result == S_OK);
+	}
+
+	result = output_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)&output_audio_client);
+	ASSERT(result == S_OK);
+
+	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)&input_audio_client);
+	ASSERT(result == S_OK);
+
+
+	WAVEFORMATEX of = {};
+	DWORD output_stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+	WAVEFORMATEX ipf = {};
+	DWORD input_stream_flags =  AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+	if (pl.audio.input.is_loopback)
+	{
+		input_stream_flags = input_stream_flags | AUDCLNT_STREAMFLAGS_LOOPBACK;
+	}
+
+
+	of.wFormatTag = WAVE_FORMAT_PCM;
+	of.nChannels = pl.audio.output.format.no_channels;
+	of.nSamplesPerSec = pl.audio.output.format.samples_per_second;
+	of.nBlockAlign = (pl.audio.output.format.no_channels * pl.audio.output.format.no_bits_per_sample) / 8;
+	of.nAvgBytesPerSec = pl.audio.output.format.samples_per_second * of.nBlockAlign;
+	of.wBitsPerSample = pl.audio.output.format.no_bits_per_sample;
+
+	ipf.wFormatTag = WAVE_FORMAT_PCM;
+	ipf.nChannels = pl.audio.input.format.no_channels;
+	ipf.nSamplesPerSec = pl.audio.input.format.samples_per_second;
+	ipf.nBlockAlign = (pl.audio.input.format.no_channels * pl.audio.input.format.no_bits_per_sample) / 8;
+	ipf.nAvgBytesPerSec = pl.audio.input.format.samples_per_second * ipf.nBlockAlign;
+	ipf.wBitsPerSample = pl.audio.input.format.no_bits_per_sample;
+
+
+	// REFERENCE_TIME time units per second and per millisecond
+	#define REFTIMES_PER_SEC  10000000
+
+	if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count == 0)
+	{
+		pl.audio.input.format.buffer_duration_seconds = 1.0f;	//ASSESS: Whether i should even allow the user not specify how big the buffer is. (should i assert here)
+	}
+	else if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count != 0)
+	{
+		pl.audio.input.format.buffer_duration_seconds = REFTIMES_PER_SEC * (f32)pl.audio.input.format.buffer_frame_count / (f32)pl.audio.input.format.samples_per_second;
+	}
+
+	uint32 duration = (pl.audio.input.format.buffer_duration_seconds * (f32)REFTIMES_PER_SEC);
+	result = input_audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, input_stream_flags, duration, 0, &ipf, 0);
+	ASSERT(result == S_OK);
+
+	result = input_audio_client->GetBufferSize(&pl.audio.input.format.buffer_frame_count);
+	ASSERT(result == S_OK);
+
+	pl.audio.input.format.buffer_duration_seconds = REFTIMES_PER_SEC * (f32)pl.audio.input.format.buffer_frame_count / (f32)pl.audio.input.format.samples_per_second;
+	#undef REFTIMES_PER_SEC
+
+	result = input_audio_client->Start();
+	ASSERT(result == S_OK);
+
+
+}
+void PL_poll_audio(PL& pl)
+{
+	//TODO: retrieve audio buffer from input device
+	//TODO: make the input buffer a circular buffer that collects input packets on a seperate thread till frame end and then waits for half a frame then starts reading into buffer again.
+}
+void PL_push_audio(PL& pl)
+{
+	//TODO: push out audio buffer to output device
+}
+
+//-------------------------------</Win32 Audio stuff>------------------------------------------
+
+
 
 
 //--------------------------------<Win32 ENTRY POINT>------------------------------------------
+//A platform's PL implementation has the job of creating a PL object and a platform_specific object in the main() and calling PL_entry_point to let the 
+//application handle how the initialization and how the game loop runs. 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 					_In_opt_ HINSTANCE hPrevInstance,
 					_In_ LPWSTR    lpCmdLine,
@@ -317,34 +422,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 	PL pl = {};
 	pl.platform_specific = &pl_win32;
 
-	PL_initialize(pl);
-	while (pl.running)
-	{
-		PL_poll(pl);
-		PL_update(pl);
-		PL_push(pl);
-	}
+	PL_entry_point(pl);
 }
 //--------------------------------</Win32 ENTRY POINT>------------------------------------------
-
-
-void PL_initialize(PL& pl)
-{
-	pl.running = TRUE;
-	pl.initialized = FALSE;
-	PL_initialize_timing(pl);
-	PL_initialize_window(pl);
-	PL_initialize_bitmap(pl);
-	pl.initialized = TRUE;
-}
-
-void PL_poll(PL& pl)
-{
-	PL_poll_timing(pl);
-	PL_poll_window(pl);
-}
-
-void PL_push(PL &pl)
-{
-	PL_push_window(pl);
-}
