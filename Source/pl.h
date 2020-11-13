@@ -67,8 +67,8 @@ struct PL_Audio_Format
 	uint32 no_channels;
 	uint32 no_bits_per_sample;
 	uint32 samples_per_second;				
-	uint32 buffer_frame_count;			    //NOTE: The amount of frames (frames is sample size * no of channels) in the buffer. If this is 0, time will be used to calculate and create buffer
-	f32 buffer_duration_seconds;			//NOTE: If this is 0, buffer_sample_size is used. if both are zero, this is 1.0(1 second).
+	uint32 buffer_frame_count;			    //The amount of frames (frames = sample size * no of channels) in the buffer. If this is 0, time will be used to calculate and create buffer
+	f32 buffer_duration_seconds;			//If this is 0, buffer_sample_size is used. if both are zero, this is 1.0(1 second).
 };
  
 struct PL_Audio_Output
@@ -76,9 +76,11 @@ struct PL_Audio_Output
 	PL_Audio_Format format;
 };
 
+//implement getting size of buffer for past x time
 struct PL_Audio_Input
 {
-	uint32 no_of_frames_available;
+	uint32 no_of_new_frames;				//The number of incoming frames polled from last game loop
+	f32* sink_buffer;						//Buffer of input frames of size format.buffer_frame_count
 	b32 is_loopback;
 	PL_Audio_Format format;
 };
@@ -95,10 +97,10 @@ void PL_initialize_audio(PL& pl);
 struct PL_Bitmap
 {
 	void* buffer;
-	int height;
-	int width;
-	int bytes_per_pixel;
-	int pitch;
+	uint32 height;
+	uint32 width;
+	uint32 bytes_per_pixel;
+	uint32 pitch;
 	uint32 size;
 };
 void PL_initialize_bitmap(PL& pl);
@@ -106,10 +108,10 @@ void PL_initialize_bitmap(PL& pl);
 struct PL_Window
 {
 	b32 was_altered;
-	int position_x;
-	int position_y;
-	int height;
-	int width;
+	int32 position_x;
+	int32 position_y;
+	uint32 height;
+	uint32 width;
 	char* title;
 };
 void PL_poll_window(PL& pl);
