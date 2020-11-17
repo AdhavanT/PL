@@ -6,13 +6,6 @@
 #include "pl.h"
 #include <stdio.h>
 
-struct RingBuffer
-{
-	void* buffer_front;
-	int32 front;
-	int32 size;
-};
-
 struct Win32Specific
 {
 	HINSTANCE hInstance;
@@ -25,7 +18,7 @@ struct Win32Specific
 
 	//Audio stuff
 	IAudioClient *input;
-	RingBuffer input_ring_buffer;
+	void* input_fifo_buffer;
 	IAudioCaptureClient* input_capture_client;
 	IAudioClient *output;
 };
@@ -249,9 +242,6 @@ void PL_push_window(PL& pl)
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
 
-	//clearing the screen to black before drawing
-	//PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, WHITENESS);
-
 	//NOTE:Making sure to keep the buffer-to-monitor pixel mapping consistant. (not stretching the image to fit window.)
 	StretchDIBits(
 		WIN32_SPECIFIC(pl)->main_monitor_DC,
@@ -353,17 +343,12 @@ void PL_initialize_bitmap(PL& pl)
 //-------------------------------</bitmap stuff>-----------------------------------------------
 
 //-------------------------------<Win32 Audio stuff>-------------------------------------------
-//NOTE: Input audio stream is in loopback mode. Audio streams are initialized by defaults. 
-void PL_initialize_audio(PL& pl)
+void PL_initialize_audio_render(PL& pl)
 {
-	CoInitializeEx(0, COINIT_MULTITHREADED);	//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
+	CoInitializeEx(0, COINIT_MULTITHREADED);//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
 	IMMDeviceEnumerator* pEnumerator = 0;
 	IMMDevice* output_endpoint = 0;
-	IMMDevice* input_endpoint = 0;
-
 	IAudioClient** output_audio_client = &WIN32_SPECIFIC(pl)->output;
-	IAudioClient** input_audio_client = &WIN32_SPECIFIC(pl)->input;
-
 
 	HRESULT result;
 	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
@@ -372,31 +357,27 @@ void PL_initialize_audio(PL& pl)
 	result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &output_endpoint);
 	ASSERT(result == S_OK);
 
-	if (pl.audio.input.is_loopback)
-	{
-		result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &input_endpoint);	//It's eRender instead of eCapture cause input is loopback.
-		ASSERT(result == S_OK);
-	}
-	else
-	{
-		result = pEnumerator->GetDefaultAudioEndpoint(eCapture, eMultimedia, &input_endpoint);
-		ASSERT(result == S_OK);
-	}
-
 	result = output_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)output_audio_client);
 	ASSERT(result == S_OK);
 
-	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)input_audio_client);
-	ASSERT(result == S_OK);
-
-
 	WAVEFORMATEX of = {};
 	DWORD output_stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
-	WAVEFORMATEX ipf = {};
-	DWORD input_stream_flags =  AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
-	if (pl.audio.input.is_loopback)
+	WAVEFORMATEX* q_of;
+
+	(*output_audio_client)->GetMixFormat(&q_of);
+
+	//setting defaults (non-initialized values in format)
+	if (pl.audio.input.format.no_bits_per_sample == 0)
 	{
-		input_stream_flags = input_stream_flags | AUDCLNT_STREAMFLAGS_LOOPBACK;
+		pl.audio.input.format.no_bits_per_sample = q_of->wBitsPerSample;
+	}
+	if (pl.audio.input.format.no_channels == 0)
+	{
+		pl.audio.input.format.no_channels = q_of->nChannels;
+	}
+	if (pl.audio.input.format.samples_per_second == 0)
+	{
+		pl.audio.input.format.samples_per_second = q_of->nSamplesPerSec;
 	}
 
 	of.wFormatTag = WAVE_FORMAT_PCM;
@@ -406,6 +387,65 @@ void PL_initialize_audio(PL& pl)
 	of.nAvgBytesPerSec = pl.audio.output.format.samples_per_second * of.nBlockAlign;
 	of.wBitsPerSample = pl.audio.output.format.no_bits_per_sample;
 
+}
+
+void PL_initialize_audio_capture(PL& pl)
+{
+	CoInitializeEx(0, COINIT_MULTITHREADED);//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
+	IMMDeviceEnumerator* pEnumerator = 0;
+
+	IMMDevice* input_endpoint = 0;
+
+	IAudioClient** input_audio_client = &WIN32_SPECIFIC(pl)->input;
+
+
+	HRESULT result;
+	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+	ASSERT(!FAILED(result));
+
+	
+
+	if (pl.audio.input.is_loopback)
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &input_endpoint);//It's eRender instead of eCapture cause input is loopback.
+		ASSERT(result == S_OK);
+	}
+	else
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eCapture, eMultimedia, &input_endpoint);
+		ASSERT(result == S_OK);
+	}
+
+	
+
+	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)input_audio_client);
+	ASSERT(result == S_OK);
+
+
+	WAVEFORMATEX ipf = {};
+	DWORD input_stream_flags = AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+	WAVEFORMATEX *q_ipf;
+	(*input_audio_client)->GetMixFormat(&q_ipf);
+
+	//setting defaults (non-initialized values in format)
+	if (pl.audio.input.format.no_bits_per_sample == 0)
+	{
+		pl.audio.input.format.no_bits_per_sample = q_ipf->wBitsPerSample;
+	}
+	if (pl.audio.input.format.no_channels == 0)
+	{
+		pl.audio.input.format.no_channels = q_ipf->nChannels;
+	}
+	if (pl.audio.input.format.samples_per_second == 0)
+	{
+		pl.audio.input.format.samples_per_second = q_ipf->nSamplesPerSec;
+	}
+
+	if (pl.audio.input.is_loopback)
+	{
+		input_stream_flags = input_stream_flags | AUDCLNT_STREAMFLAGS_LOOPBACK;
+	}
+
 	ipf.wFormatTag = WAVE_FORMAT_PCM;
 	ipf.nChannels = pl.audio.input.format.no_channels;
 	ipf.nSamplesPerSec = pl.audio.input.format.samples_per_second;
@@ -413,7 +453,7 @@ void PL_initialize_audio(PL& pl)
 	ipf.nAvgBytesPerSec = pl.audio.input.format.samples_per_second * ipf.nBlockAlign;
 	ipf.wBitsPerSample = pl.audio.input.format.no_bits_per_sample;
 
-
+	
 	// REFERENCE_TIME time units per second and per millisecond
 	#define REFTIMES_PER_SEC  10000000
 
@@ -423,7 +463,8 @@ void PL_initialize_audio(PL& pl)
 	}
 	else if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count != 0)
 	{
-		pl.audio.input.format.buffer_duration_seconds = REFTIMES_PER_SEC * (f32)pl.audio.input.format.buffer_frame_count / (f32)pl.audio.input.format.samples_per_second;
+		pl.audio.input.format.buffer_duration_seconds = REFTIMES_PER_SEC * (f32)pl.audio.input.format.buffer_frame_count;
+		pl.audio.input.format.buffer_duration_seconds /= (f32)pl.audio.input.format.samples_per_second;
 	}
 
 	uint32 duration = (uint32)(pl.audio.input.format.buffer_duration_seconds * (f32)REFTIMES_PER_SEC);
@@ -443,26 +484,24 @@ void PL_initialize_audio(PL& pl)
 	ASSERT(result == S_OK);
 
 	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
-
-	WIN32_SPECIFIC(pl)->input_ring_buffer.size = pl.audio.input.format.buffer_frame_count;
-	WIN32_SPECIFIC(pl)->input_ring_buffer.buffer_front = calloc(1, (WIN32_SPECIFIC(pl)->input_ring_buffer.size * bytes_per_frame));
-	WIN32_SPECIFIC(pl)->input_ring_buffer.front = 0;
+	
+	WIN32_SPECIFIC(pl)->input_fifo_buffer = calloc(1, (pl.audio.input.format.buffer_frame_count * bytes_per_frame));
 
 	pl.audio.input.sink_buffer = (f32*)calloc(1,pl.audio.input.format.buffer_frame_count * sizeof(f32) * pl.audio.input.format.no_channels);
 
-	PL_poll_audio(pl);
+	PL_poll_audio_capture(pl);
 }
 
 
-void PL_poll_audio(PL& pl)
+void PL_poll_audio_capture(PL& pl)
 {
 
 	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
 
-	RingBuffer* rb = &WIN32_SPECIFIC(pl)->input_ring_buffer;
+	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
 	f32* sink_front = pl.audio.input.sink_buffer;
 
-	//Polling audio framess
+	//Polling audio frames
 	uint32 packet_length;
 	HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
 	ASSERT(result == S_OK);
@@ -472,6 +511,7 @@ void PL_poll_audio(PL& pl)
 	uint32 no_frames_polled = 0;
 	uint32 no_frames_in_packet;
 	b32 packet_is_silence = FALSE;
+	
 	while (packet_length != 0)
 	{
 		HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetBuffer(&input_buffer, &no_frames_in_packet, &flags, NULL, NULL);
@@ -508,44 +548,20 @@ void PL_poll_audio(PL& pl)
 
 		if (packet_is_silence == TRUE)		//writing 0 to the ring buffer
 		{
-			int32 new_front = no_frames_in_packet + rb->front;
-			b32 fits = new_front <= rb->size;
-			if (fits)
-			{
-				void* to = (uint8*)rb->buffer_front + (bytes_per_frame * rb->front);
-				memset(to, 0, no_frames_in_packet * bytes_per_frame);
-				rb->front = new_front % rb->size;
-			}
-			else
-			{
-				uint32 fill_buffer = rb->size - rb->front;
-				void* to = (uint8*)rb->buffer_front + (rb->front * bytes_per_frame);
-				memset(to, 0, fill_buffer * bytes_per_frame);			//filling to end of buffer
-				rb->front = new_front - rb->size;
-				memset(rb->buffer_front, 0, bytes_per_frame * rb->front);	//filling remaining
-			}
-
+			//shifting buffer left to make room;	
+			int32 bytes_to_new_front = (pl.audio.input.format.buffer_frame_count - no_frames_in_packet) * bytes_per_frame;
+			memmove(rb, (uint8*)rb + (bytes_per_frame * no_frames_in_packet), bytes_to_new_front);
+			//setting packets at end to 0
+			memset((uint8*)rb + bytes_to_new_front, 0, no_frames_in_packet * bytes_per_frame);
 			no_frames_polled += no_frames_in_packet;
 		}
 		else
-		{
-			//adding it to the ring buffer
-			int32 new_front = no_frames_in_packet + rb->front;
-			b32 fits = new_front <= rb->size;
-			if (fits)
-			{
-				void* to = (uint8*)rb->buffer_front + (bytes_per_frame * rb->front);
-				memcpy(to, input_buffer, no_frames_in_packet * bytes_per_frame);
-				rb->front = new_front % rb->size;
-			}
-			else
-			{
-				uint32 fill_buffer = rb->size - rb->front;
-				void* to = (uint8*)rb->buffer_front + (rb->front * bytes_per_frame);
-				memcpy(to, input_buffer, fill_buffer * bytes_per_frame);			//filling to end of buffer
-				rb->front = new_front - rb->size;
-				memcpy(rb->buffer_front, input_buffer, bytes_per_frame * rb->front);	//filling remaining
-			}
+		{	
+			//shifting left
+			int32 bytes_to_new_front = (pl.audio.input.format.buffer_frame_count - no_frames_in_packet) * bytes_per_frame;
+			memmove(rb, (uint8*)rb + (bytes_per_frame * no_frames_in_packet), bytes_to_new_front);
+			//copying packet to end of fifo buffer
+			memcpy((uint8*)rb + bytes_to_new_front, input_buffer, no_frames_in_packet * bytes_per_frame);
 			no_frames_polled += no_frames_in_packet;
 		}
 		//copy to input_buffer to cyclic buffer 
@@ -559,13 +575,13 @@ void PL_poll_audio(PL& pl)
 	ASSERT(no_frames_polled <= pl.audio.input.format.buffer_frame_count);	//it spent more time polling than the buffer_duration_seconds
 	pl.audio.input.no_of_new_frames = no_frames_polled;
 
-	static uint32 polled_since_last_frame = 0;
+	static uint32 frames_polled_since_last_buffer_fill = 0;
 	if (pl.audio.input.only_update_every_new_buffer)
 	{
-		polled_since_last_frame += no_frames_polled;
-		if (polled_since_last_frame >= pl.audio.input.format.buffer_frame_count)
+		frames_polled_since_last_buffer_fill += no_frames_polled;
+		if (frames_polled_since_last_buffer_fill >= pl.audio.input.format.buffer_frame_count)
 		{
-			polled_since_last_frame = 0;
+			frames_polled_since_last_buffer_fill = 0;
 			pl.audio.input.no_of_new_frames = pl.audio.input.format.buffer_frame_count;
 		}
 		else
@@ -573,212 +589,70 @@ void PL_poll_audio(PL& pl)
 			return;
 		}
 	}
+	
 
 	//Adding polled audio frames into floating-point sink_buffer
 	if (pl.audio.input.no_of_new_frames != 0)	//adding the new frames to the sink_buffer
 	{
 		//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
-		//getting the new_end of the buffer : buffer_size - amount_to_shift - 1
-		int32 no_floats_to_shift = (pl.audio.input.no_of_new_frames * pl.audio.input.format.no_channels);
-		int32 new_end = (pl.audio.input.format.buffer_frame_count * pl.audio.input.format.no_channels) - no_floats_to_shift;
-		for (int32 i = 0; i < new_end; i++)
-		{
-			sink_front[i + no_floats_to_shift] = sink_front[i];	//resverse to shift left
-		}
-		//NOTE: This is for a forward buffer where the newest frame is at the beginning of the sink buffer
-		//converting/transfering the newly added frames into floating point sink buffer from fixed point ring buffer
+		int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
+		void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
+		memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames)* no_bytes_per_frame);
+
+		//NOTE: This is for setting the newest frame at the beginning of the sink buffer
+		//converting/transfering the newly added frames into floating point sink buffer from fixed point fifo buffer
 		if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 2)
 		{
-			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
-			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
+			int16* left_channel = (int16*)rb + ((pl.audio.input.format.buffer_frame_count-1) * 2);
+			int16* right_channel = left_channel + 1;
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
 			{
-				int16* left_channel = (int16*)(rb->buffer_front);
-				left_channel = left_channel + 2*(rb->front - 1);	//-1 to account for rb->front pointing the the last frame not, the first. 
-				int16* right_channel = left_channel + 1;
-				for (int32 i = pl.audio.input.no_of_new_frames; i > 0; i--)
-				{
-					*sink_front = ((f32)*left_channel) / 32767.f;
-					sink_front++;
-					*sink_front = ((f32)*right_channel) / 32767.f;
-					sink_front++;
-					left_channel-=2;
-					right_channel -= 2;
-				}
-			}
-			else   //need to read front front of ring buffer then cycle back to end to front agian. 
-			{
-				int16* left_channel = (int16*)(rb->buffer_front);
-				left_channel = left_channel + 2 * (rb->front - 1);	//-1 to account for rb->front pointing the the last frame not, the first. 
-				int16* right_channel = left_channel + 1;
-				for (int32 i = rb->front; i > 0; i--)
-				{
-					*sink_front = ((f32)*left_channel) / 32767.f;
-					sink_front++;
-					*sink_front = ((f32)*right_channel) / 32767.f;
-					sink_front++;
-					left_channel -= 2;
-					right_channel -= 2;
-				}
-
-				left_channel = (int16*)(rb->buffer_front);
-				left_channel = left_channel + 2*(rb->size - 1);
-				right_channel = left_channel + 1;
-				
-				for (int32 i = -frames_from_front; i > 0; i--)	//-frames_from_front is the remaining new_frames after sampling from front
-				{
-					*sink_front = ((f32)*left_channel) / 32767.f;
-					sink_front++;
-					*sink_front = ((f32)*right_channel) / 32767.f;
-					sink_front++;
-					left_channel -= 2;
-					right_channel -= 2;
-				}
-				
+				*sink_front = ((f32)*left_channel) / 32767.f;
+				sink_front++;
+				*sink_front = ((f32)*right_channel) / 32767.f;
+				sink_front++;
+				left_channel -= 2;
+				right_channel -= 2;
 			}
 		}
 		else if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 1)
 		{
-			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
-			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
+			int16* single_channel = (int16*)rb + (pl.audio.input.format.buffer_frame_count - 1);
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
 			{
-			    int16* single_channel = (int16*)(rb->buffer_front);
-				single_channel = single_channel + rb->front - 1;	//-1 to account for rb->front pointing the the last frame not, the first. 
-				for (int32 i = pl.audio.input.no_of_new_frames; i > 0; i--)
-				{
-					*sink_front = ((f32)*single_channel) / 32767.f;
-					single_channel--;
-					sink_front++;
-				}
-			}
-			else   //need to read front front of ring buffer then cycle back to end to front agian. 
-			{
-				int16* single_channel = (int16*)(rb->buffer_front);
-				single_channel = single_channel + rb->front - 1;	//-1 to account for rb->front pointing the the last frame not, the first. 
-				for (int32 i = rb->front; i > 0; i--)
-				{
-					*sink_front = ((f32)*single_channel) / 32767.f;
-					single_channel--;
-					sink_front++;
-				}
-				single_channel = (int16*)(rb->buffer_front);
-				single_channel = single_channel + rb->size - 1;
-				{
-					for (int32 i = -frames_from_front; i > 0; i--)	//-frames_from_front is the remaining new_frames after sampling from front
-					{
-						*sink_front = ((f32)*single_channel) / 32767.f;
-						single_channel--;
-						sink_front++;
-					}
-				}
-			}
-		}
-		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 1)
-		{
-			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
-			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
-			{
-				int32* single_channel = (int32*)(rb->buffer_front);
-				single_channel = single_channel + rb->front - 1;	//-1 to account for rb->front pointing the the last frame not, the first. 
-				for (int32 i = pl.audio.input.no_of_new_frames; i > 0; i--)
-				{
-					f64 for_buffer;
-					for_buffer = ((f64)*single_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					single_channel--;
-					sink_front++;
-				}
-			}
-			else   //need to read front front of ring buffer then cycle back to end to front agian. 
-			{
-				int32* single_channel = (int32*)(rb->buffer_front);
-				single_channel = single_channel + rb->front - 1;	//-1 to account for rb->front pointing the the last frame not, the first. 
-				for (int32 i = rb->front; i > 0; i--)
-				{
-					f64 for_buffer;
-					for_buffer = ((f64)*single_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					single_channel--;
-					sink_front++;
-				}
-				single_channel = (int32*)(rb->buffer_front);
-				single_channel = single_channel + rb->size - 1;
-				{
-					for (int32 i = -frames_from_front; i > 0; i--)	//-frames_from_front is the remaining new_frames after sampling from front
-					{
-						f64 for_buffer;
-						for_buffer = ((f64)*single_channel) / 2147483647.0;
-						*sink_front = (f32)for_buffer;
-						single_channel--;
-						sink_front++;
-					}
-				}
+				*sink_front = ((f32)*single_channel) / 32767.f;
+				sink_front++;
+				single_channel--;
 			}
 		}
 		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 2)
 		{
-			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
-			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
+			int32* left_channel = (int32*)rb + ((pl.audio.input.format.buffer_frame_count - 1) * 2);
+			int32* right_channel = left_channel + 1;
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
 			{
-				int32* left_channel = (int32*)(rb->buffer_front);
-				left_channel = left_channel + 2 * (rb->front - 1);	//-1 to account for rb->front pointing the the last frame not, the first. 
-				int32* right_channel = left_channel + 1;
-				for (int32 i = pl.audio.input.no_of_new_frames; i > 0; i--)
-				{
-					f64 for_buffer;
-					for_buffer = ((f64)*left_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					sink_front++;
-					for_buffer = ((f64)*right_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					sink_front++;
-					left_channel -= 2;
-					right_channel -= 2;
-				}
+				*sink_front = (f32)(((f64)*left_channel) / 2147483647.0);
+				sink_front++;
+				*sink_front = (f32)(((f64)*right_channel) / 2147483647.0);
+				sink_front++;
+				left_channel -= 2;
+				right_channel -= 2;
 			}
-			else   //need to read front front of ring buffer then cycle back to end to front agian. 
+		}
+		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 1)
+		{
+			int32* single_channel = (int32*)rb + (pl.audio.input.format.buffer_frame_count - 1);
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
 			{
-				int32* left_channel = (int32*)(rb->buffer_front);
-				left_channel = left_channel + 2 * (rb->front - 1);	//-1 to account for rb->front pointing the the last frame not, the first. 
-				int32* right_channel = left_channel + 1;
-				for (int32 i = rb->front; i > 0; i--)
-				{
-					f64 for_buffer;
-					for_buffer = ((f64)*left_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					sink_front++;
-					for_buffer = ((f64)*right_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					sink_front++;
-					left_channel -= 2;
-					right_channel -= 2;
-				}
-
-				left_channel = (int32*)(rb->buffer_front);
-				left_channel = left_channel + 2 * (rb->size - 1);
-				right_channel = left_channel + 1;
-
-				for (int32 i = -frames_from_front; i > 0; i--)	//-frames_from_front is the remaining new_frames after sampling from front
-				{
-					f64 for_buffer;
-					for_buffer = ((f64)*left_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					sink_front++;
-					for_buffer = ((f64)*right_channel) / 2147483647.0;
-					*sink_front = (f32)for_buffer;
-					sink_front++;
-					left_channel -= 2;
-					right_channel -= 2;
-				}
-
+				*sink_front = (f32)(((f64)*single_channel) / 2147483647.0);
+				sink_front++;
+				single_channel--;
 			}
 		}
 	}
 	
-	
-	//TODO: retrieve audio buffer from input device
-	//TODO: make the input buffer a circular buffer that collects input packets on a seperate thread till frame end and then waits for half a frame then starts reading into buffer again.
 }
-void PL_push_audio(PL& pl)
+void PL_push_audio_render(PL& pl)
 {
 	//TODO: push out audio buffer to output device
 }
@@ -789,8 +663,8 @@ void PL_push_audio(PL& pl)
 
 
 //--------------------------------<Win32 ENTRY POINT>------------------------------------------
-//A platform's PL implementation has the job of creating a PL object and a platform_specific object in the main() and calling PL_entry_point to let the 
-//application handle how the initialization and how the game loop runs. 
+//A platform's PL implementation has the job of creating a PL object and a platform_specific object in the main() 
+// and calling PL_entry_point to let the application handle how the initialization and game loop runs. 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 					_In_opt_ HINSTANCE hPrevInstance,
 					_In_ LPWSTR    lpCmdLine,
