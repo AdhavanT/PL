@@ -43,8 +43,6 @@ typedef float f32;
 typedef double f64;
 //-----------------------------------------------
 struct PL;
-//-----------------------------------------------------<Timing>-----------------------------------------------------
-
 struct PL_Timing
 {
 	uint64 cycles_per_second;
@@ -63,32 +61,7 @@ struct PL_Timing
 };
 void PL_poll_timing(PL& pl);
 void PL_initialize_timing(PL& pl);
-//-----------------------------------------------------</Timing>----------------------------------------------------
 
-//-----------------------------------------------------<Input>------------------------------------------------------
-struct PL_Digital_Button
-{
-	b32 is_down;
-	b32 was_released;
-	b32 was_pressed;
-};
-struct PL_Mouse_Input
-{
-	b32 is_in_window;
-	int32 position_x;
-	int32 position_y;
-	PL_Digital_Button left;
-	PL_Digital_Button right;
-};
-struct PL_Input
-{
-	PL_Mouse_Input mouse;
-};
-void PL_poll_input(PL& pl);
-void PL_initialize_input(PL& pl);
-//-----------------------------------------------------</Input>-----------------------------------------------------
-
-//-----------------------------------------------------<Audio>------------------------------------------------------
 struct PL_Audio_Format
 {
 	uint32 no_channels;
@@ -103,12 +76,12 @@ struct PL_Audio_Output
 	PL_Audio_Format format;
 };
 
+//implement getting size of buffer for past x time
 struct PL_Audio_Input
 {
 	uint32 no_of_new_frames;				//The number of incoming frames polled from last game loop
-	f32* sink_buffer;						//Newest frame is at front.
+	f32* sink_buffer;						//Buffer of input frames of size format.buffer_frame_count
 	b32 is_loopback;
-	b32 only_update_every_new_buffer;
 	PL_Audio_Format format;
 };
 
@@ -120,10 +93,7 @@ struct PL_Audio
 void PL_poll_audio(PL& pl);
 void PL_push_audio(PL& pl);
 void PL_initialize_audio(PL& pl);
-//-----------------------------------------------------</Audio>----------------------------------------------------
 
-
-//-----------------------------------------------------<Bitmap>-----------------------------------------------------
 struct PL_Bitmap
 {
 	void* buffer;
@@ -134,9 +104,7 @@ struct PL_Bitmap
 	uint32 size;
 };
 void PL_initialize_bitmap(PL& pl);
-//-----------------------------------------------------</Bitmap>----------------------------------------------------
 
-//-----------------------------------------------------<Window>-----------------------------------------------------
 struct PL_Window
 {
 	b32 was_altered;
@@ -149,14 +117,11 @@ struct PL_Window
 void PL_poll_window(PL& pl);
 void PL_push_window(PL& pl);
 void PL_initialize_window(PL& pl);
-//-----------------------------------------------------</Window>----------------------------------------------------
 
 struct PL
 {
-	uint32 core_count;
 	b32 initialized;
 	b32 running;
-	PL_Input input;
 	PL_Timing time;
 	PL_Audio audio;
 	PL_Window window;
