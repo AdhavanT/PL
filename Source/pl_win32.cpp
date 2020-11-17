@@ -1,24 +1,34 @@
 #include <windows.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#include <windowsx.h>
 #include <malloc.h>
 #include "pl.h"
 #include <stdio.h>
 
 struct Win32Specific
 {
+	HINSTANCE hInstance;
+	//Window stuff
 	BITMAPINFO bmi_header;
 	HDC main_monitor_DC;
-	HINSTANCE hInstance;
 	HWND wnd_handle;
 	void* main_fiber;
 	void* message_fiber;
-};
 
+	//Audio stuff
+	IAudioClient *input;
+	void* input_fifo_buffer;
+	IAudioCaptureClient* input_capture_client;
+	IAudioClient *output;
+};
+#define WIN32_SPECIFIC(x) ((Win32Specific*)x.platform_specific)
 
 //-------------------------------<win32 window stuff>----------------------------------------
-void PL_poll_window(PL& pl);
+//Also handles Keyboard and Mouse input polling. 
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);//actual win32 message callback
 void static CALLBACK wnd_message_fiber_proc(PL& pl);//for switching to fiber that handles processing message callbacks
-static void PL_initialize_window(PL& pl)
+void PL_initialize_window(PL& pl)
 {
 	int window_width, window_height;
 	if (pl.window.height == 0)	//uninitialized
@@ -61,12 +71,13 @@ static void PL_initialize_window(PL& pl)
 	wnd_class.lpfnWndProc = wnd_proc;
 	wnd_class.lpszClassName = "pl_window_class";
 	wnd_class.style = CS_VREDRAW | CS_HREDRAW;
-	wnd_class.hInstance = ((Win32Specific*)pl.platform_specific)->hInstance;
+	wnd_class.hInstance = WIN32_SPECIFIC(pl)->hInstance;
+	wnd_class.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(32515));
 
 	HRESULT s = RegisterClassA(&wnd_class);
-	ASSERT(s);
+	ASSERT(s != 0);
 
-	((Win32Specific*)pl.platform_specific)->wnd_handle = CreateWindowExA(
+	WIN32_SPECIFIC(pl)->wnd_handle = CreateWindowExA(
 		0,
 		wnd_class.lpszClassName,
 		pl.window.title,
@@ -80,19 +91,19 @@ static void PL_initialize_window(PL& pl)
 		0,
 		0
 	);
-	ASSERT(((Win32Specific*)pl.platform_specific)->wnd_handle);
-	//ShowWindow(((Win32Specific*)pl.platform_specific)->wnd_handle, SW_SHOW);
+	ASSERT(WIN32_SPECIFIC(pl)->wnd_handle);
+	//ShowWindow(WIN32_SPECIFIC(pl)->wnd_handle, SW_SHOW);
 
 	//This passes a pointer to pl to the wnd_proc message callback. (It's retrieved by GetWindowLongPtrA(hwnd, GWLP_USERDATA))
-	SetWindowLongPtrA(((Win32Specific*)pl.platform_specific)->wnd_handle, GWL_USERDATA, (LONG_PTR)&pl);
-	PL* re = (PL*)GetWindowLongPtrA(((Win32Specific*)pl.platform_specific)->wnd_handle, GWLP_USERDATA);
+	SetWindowLongPtrA(WIN32_SPECIFIC(pl)->wnd_handle, GWL_USERDATA, (LONG_PTR)&pl);
+	PL* re = (PL*)GetWindowLongPtrA(WIN32_SPECIFIC(pl)->wnd_handle, GWLP_USERDATA);
 	
-	((Win32Specific*)pl.platform_specific)->main_fiber = ConvertThreadToFiber(0);
-	ASSERT(((Win32Specific*)pl.platform_specific)->main_fiber);
-	((Win32Specific*)pl.platform_specific)->message_fiber = CreateFiber(0, (PFIBER_START_ROUTINE)wnd_message_fiber_proc, &pl);
-	ASSERT(((Win32Specific*)pl.platform_specific)->message_fiber);
+	WIN32_SPECIFIC(pl)->main_fiber = ConvertThreadToFiber(0);
+	ASSERT(WIN32_SPECIFIC(pl)->main_fiber);
+	WIN32_SPECIFIC(pl)->message_fiber = CreateFiber(0, (PFIBER_START_ROUTINE)wnd_message_fiber_proc, &pl);
+	ASSERT(WIN32_SPECIFIC(pl)->message_fiber);
 
-	((Win32Specific*)pl.platform_specific)->main_monitor_DC = GetDC(((Win32Specific*)pl.platform_specific)->wnd_handle);
+	WIN32_SPECIFIC(pl)->main_monitor_DC = GetDC(WIN32_SPECIFIC(pl)->wnd_handle);
 
 
 	PL_poll_window(pl);
@@ -100,13 +111,12 @@ static void PL_initialize_window(PL& pl)
 
 }
 
-
 //a fiber to handle messages to keep main loop going while doing so.
 //A 1ms timer alerts the message callback when to switch to the main loop fiber.
 void CALLBACK wnd_message_fiber_proc(PL& pl)
 {
 	//Sets a timer for 1ms that sends a WM_TIMER message to the message queue
-	SetTimer(((Win32Specific*)pl.platform_specific)->wnd_handle, 1, 1, 0);
+	SetTimer(WIN32_SPECIFIC(pl)->wnd_handle, 1, 1, 0);
 
 	while (pl.running)
 	{
@@ -120,9 +130,9 @@ void CALLBACK wnd_message_fiber_proc(PL& pl)
 			TranslateMessage(&message);
 			DispatchMessageA(&message);
 		}
-		SwitchToFiber(((Win32Specific*)pl.platform_specific)->main_fiber);
+		SwitchToFiber(WIN32_SPECIFIC(pl)->main_fiber);
 	}
-	SwitchToFiber(((Win32Specific*)pl.platform_specific)->main_fiber);
+	SwitchToFiber(WIN32_SPECIFIC(pl)->main_fiber);
 
 } 
 
@@ -136,17 +146,27 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 	}
 	switch (uMsg)
 	{
-		case WM_MOVE:
-		{
-			pl->window.was_altered = TRUE;
-
-		}break;
-
-		case WM_SIZE:
+		case WM_ENTERSIZEMOVE:
 		{
 			pl->window.was_altered = TRUE;	
+			SetTimer(hwnd, 1, 1, 0);
 		}break;
+		case WM_EXITSIZEMOVE:
+		{
+			pl->window.was_altered = FALSE;
+			KillTimer(hwnd, 1);
 
+		}break;
+		case WM_MOUSEMOVE:
+		{
+			POINT pos;
+			pos.x = GET_X_LPARAM(lParam);
+			pos.y = GET_Y_LPARAM(lParam);
+			pl->input.mouse.position_x = pos.x;
+			pl->input.mouse.position_y = pl->window.height - pos.y;	//to be consistant with bottom left being (0,0)
+			
+
+		}break;
 		case WM_KEYUP:
 		{
 			uint32 VKCode = wParam;
@@ -181,27 +201,30 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 void PL_poll_window(PL &pl)
 {
-	SwitchToFiber(((Win32Specific*)pl.platform_specific)->message_fiber);
+	SwitchToFiber(WIN32_SPECIFIC(pl)->message_fiber);
 
 	if (pl.window.was_altered || (pl.initialized == FALSE))
 	{
 		//NOTE:not gettin device context every time window moves. Checked with multi-monitor setup, worked fine with single device context. 
-		//((Win32Specific*)pl.platform_specific)->main_monitor_DC = GetDC(((Win32Specific*)pl.platform_specific)->wnd_handle);
+		//WIN32_SPECIFIC(pl)->main_monitor_DC = GetDC(WIN32_SPECIFIC(pl)->wnd_handle);
 
 		RECT client_rectangle = {};
-		GetClientRect(((Win32Specific*)pl.platform_specific)->wnd_handle, &client_rectangle);
+		GetClientRect(WIN32_SPECIFIC(pl)->wnd_handle, &client_rectangle);
 
 		pl.window.width = client_rectangle.right - client_rectangle.left;
 		pl.window.height = client_rectangle.bottom - client_rectangle.top;
 
 		POINT window_position = {};
-		ClientToScreen(((Win32Specific*)pl.platform_specific)->wnd_handle, &window_position);
+		ClientToScreen(WIN32_SPECIFIC(pl)->wnd_handle, &window_position);
 
 		pl.window.position_x = window_position.x;
 		pl.window.position_y = window_position.y;
 
-		pl.window.was_altered = FALSE;
+		//FIXME: This clears the window to black on resizing to avoid the extra window(outside bitmap) from copying the previous frame. 
+		//It also causes random black frames while resizing.
+		PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, BLACKNESS);
 	}
+
 	//TODO: get mouse input and stuff
 }
  
@@ -214,24 +237,24 @@ void PL_push_window(PL& pl)
 	{
 		int32 frame_rate = (int32)(pl.time.cycles_per_second / pl.time.delta_cycles);
 		char buffer[256];
-		sprintf_s(buffer, "Time per frame: %.*fms , %dFPS\n",2, pl.time.fdelta_seconds * 1000, frame_rate);
-		SetWindowTextA(((Win32Specific*)pl.platform_specific)->wnd_handle, buffer);
+		sprintf_s(buffer, "Time per frame: %.*fms , %dFPS\n",2, (f64)pl.time.fdelta_seconds * 1000, frame_rate);
+		SetWindowTextA(WIN32_SPECIFIC(pl)->wnd_handle, buffer);
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
 
+	//NOTE:Making sure to keep the buffer-to-monitor pixel mapping consistant. (not stretching the image to fit window.)
 	StretchDIBits(
-		((Win32Specific*)pl.platform_specific)->main_monitor_DC,
-		0, 0, pl.window.width, pl.window.height,
+		WIN32_SPECIFIC(pl)->main_monitor_DC,
+		0, 0, pl.bitmap.width, pl.bitmap.height,
 		0, 0, pl.bitmap.width, pl.bitmap.height,
 		pl.bitmap.buffer,
-		&((Win32Specific*)pl.platform_specific)->bmi_header,
+		&WIN32_SPECIFIC(pl)->bmi_header,
 		DIB_RGB_COLORS, SRCCOPY);
 }
 
 //-------------------------------</win32 window stuff>----------------------------------------
 
 //-------------------------------<timing stuff>-----------------------------------------------
-
 void PL_poll_timing(PL& pl)
 {
 	LARGE_INTEGER new_q; 
@@ -268,8 +291,24 @@ void PL_initialize_timing(PL& pl)
 
 //-------------------------------</timing stuff>----------------------------------------------
 
+//-------------------------------<Input stuff>------------------------------------------------
+//NOTE: For mouse input, WM_MOUSEMOVE is used. This is less precise than WM_INPUT and only changes on 
+//when the mouse moves to another pixel. Consider using raw mouse data from WM_INPUT for more 
+//high-definition mouse input for applications that need it. 
+void PL_initialize_input(PL& pl)
+{
+
+}
+
+void PL_poll_input(PL& pl)
+{
+
+}
+
+//-------------------------------</Input stuff>-----------------------------------------------
+
 //-------------------------------<bitmap stuff>-----------------------------------------------
-static void PL_initialize_bitmap(PL& pl)
+void PL_initialize_bitmap(PL& pl)
 {
 	if (pl.bitmap.height == 0)	//uninitialized
 	{
@@ -292,7 +331,7 @@ static void PL_initialize_bitmap(PL& pl)
 	}
 	ASSERT(pl.bitmap.buffer);
 
-	BITMAPINFO* bmi = &((Win32Specific*)pl.platform_specific)->bmi_header;
+	BITMAPINFO* bmi = &WIN32_SPECIFIC(pl)->bmi_header;
 	bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
 	bmi->bmiHeader.biBitCount = 8 * pl.bitmap.bytes_per_pixel;
 	bmi->bmiHeader.biCompression = BI_RGB;
@@ -303,9 +342,329 @@ static void PL_initialize_bitmap(PL& pl)
 }
 //-------------------------------</bitmap stuff>-----------------------------------------------
 
+//-------------------------------<Win32 Audio stuff>-------------------------------------------
+void PL_initialize_audio_render(PL& pl)
+{
+	CoInitializeEx(0, COINIT_MULTITHREADED);//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
+	IMMDeviceEnumerator* pEnumerator = 0;
+	IMMDevice* output_endpoint = 0;
+	IAudioClient** output_audio_client = &WIN32_SPECIFIC(pl)->output;
+
+	HRESULT result;
+	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+	ASSERT(!FAILED(result));
+
+	result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &output_endpoint);
+	ASSERT(result == S_OK);
+
+	result = output_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)output_audio_client);
+	ASSERT(result == S_OK);
+
+	WAVEFORMATEX of = {};
+	DWORD output_stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+	WAVEFORMATEX* q_of;
+
+	(*output_audio_client)->GetMixFormat(&q_of);
+
+	//setting defaults (non-initialized values in format)
+	if (pl.audio.input.format.no_bits_per_sample == 0)
+	{
+		pl.audio.input.format.no_bits_per_sample = q_of->wBitsPerSample;
+	}
+	if (pl.audio.input.format.no_channels == 0)
+	{
+		pl.audio.input.format.no_channels = q_of->nChannels;
+	}
+	if (pl.audio.input.format.samples_per_second == 0)
+	{
+		pl.audio.input.format.samples_per_second = q_of->nSamplesPerSec;
+	}
+
+	of.wFormatTag = WAVE_FORMAT_PCM;
+	of.nChannels = pl.audio.output.format.no_channels;
+	of.nSamplesPerSec = pl.audio.output.format.samples_per_second;
+	of.nBlockAlign = (pl.audio.output.format.no_channels * pl.audio.output.format.no_bits_per_sample) / 8;
+	of.nAvgBytesPerSec = pl.audio.output.format.samples_per_second * of.nBlockAlign;
+	of.wBitsPerSample = pl.audio.output.format.no_bits_per_sample;
+
+}
+
+void PL_initialize_audio_capture(PL& pl)
+{
+	CoInitializeEx(0, COINIT_MULTITHREADED);//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
+	IMMDeviceEnumerator* pEnumerator = 0;
+
+	IMMDevice* input_endpoint = 0;
+
+	IAudioClient** input_audio_client = &WIN32_SPECIFIC(pl)->input;
+
+
+	HRESULT result;
+	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+	ASSERT(!FAILED(result));
+
+	
+
+	if (pl.audio.input.is_loopback)
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &input_endpoint);//It's eRender instead of eCapture cause input is loopback.
+		ASSERT(result == S_OK);
+	}
+	else
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eCapture, eMultimedia, &input_endpoint);
+		ASSERT(result == S_OK);
+	}
+
+	
+
+	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)input_audio_client);
+	ASSERT(result == S_OK);
+
+
+	WAVEFORMATEX ipf = {};
+	DWORD input_stream_flags = AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+	WAVEFORMATEX *q_ipf;
+	(*input_audio_client)->GetMixFormat(&q_ipf);
+
+	//setting defaults (non-initialized values in format)
+	if (pl.audio.input.format.no_bits_per_sample == 0)
+	{
+		pl.audio.input.format.no_bits_per_sample = q_ipf->wBitsPerSample;
+	}
+	if (pl.audio.input.format.no_channels == 0)
+	{
+		pl.audio.input.format.no_channels = q_ipf->nChannels;
+	}
+	if (pl.audio.input.format.samples_per_second == 0)
+	{
+		pl.audio.input.format.samples_per_second = q_ipf->nSamplesPerSec;
+	}
+
+	if (pl.audio.input.is_loopback)
+	{
+		input_stream_flags = input_stream_flags | AUDCLNT_STREAMFLAGS_LOOPBACK;
+	}
+
+	ipf.wFormatTag = WAVE_FORMAT_PCM;
+	ipf.nChannels = pl.audio.input.format.no_channels;
+	ipf.nSamplesPerSec = pl.audio.input.format.samples_per_second;
+	ipf.nBlockAlign = (pl.audio.input.format.no_channels * pl.audio.input.format.no_bits_per_sample) / 8;
+	ipf.nAvgBytesPerSec = pl.audio.input.format.samples_per_second * ipf.nBlockAlign;
+	ipf.wBitsPerSample = pl.audio.input.format.no_bits_per_sample;
+
+	
+	// REFERENCE_TIME time units per second and per millisecond
+	#define REFTIMES_PER_SEC  10000000
+
+	if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count == 0)
+	{
+		pl.audio.input.format.buffer_duration_seconds = 1.0f;
+	}
+	else if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count != 0)
+	{
+		pl.audio.input.format.buffer_duration_seconds = REFTIMES_PER_SEC * (f32)pl.audio.input.format.buffer_frame_count;
+		pl.audio.input.format.buffer_duration_seconds /= (f32)pl.audio.input.format.samples_per_second;
+	}
+
+	uint32 duration = (uint32)(pl.audio.input.format.buffer_duration_seconds * (f32)REFTIMES_PER_SEC);
+	result = (*input_audio_client)->Initialize(AUDCLNT_SHAREMODE_SHARED, input_stream_flags, duration, 0, &ipf, 0);
+	ASSERT(result == S_OK);
+
+	result = (*input_audio_client)->GetBufferSize(&pl.audio.input.format.buffer_frame_count);
+	ASSERT(result == S_OK);
+
+	pl.audio.input.format.buffer_duration_seconds = (f32)pl.audio.input.format.buffer_frame_count / (f32)pl.audio.input.format.samples_per_second;
+	#undef REFTIMES_PER_SEC
+
+	result = (*input_audio_client)->GetService(__uuidof(IAudioCaptureClient), (void**)&WIN32_SPECIFIC(pl)->input_capture_client);
+	ASSERT(result == S_OK);
+
+	result = (*input_audio_client)->Start();
+	ASSERT(result == S_OK);
+
+	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
+	
+	WIN32_SPECIFIC(pl)->input_fifo_buffer = calloc(1, (pl.audio.input.format.buffer_frame_count * bytes_per_frame));
+
+	pl.audio.input.sink_buffer = (f32*)calloc(1,pl.audio.input.format.buffer_frame_count * sizeof(f32) * pl.audio.input.format.no_channels);
+
+	PL_poll_audio_capture(pl);
+}
+
+
+void PL_poll_audio_capture(PL& pl)
+{
+
+	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
+
+	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
+	f32* sink_front = pl.audio.input.sink_buffer;
+
+	//Polling audio frames
+	uint32 packet_length;
+	HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
+	ASSERT(result == S_OK);
+
+	uint8* input_buffer;
+	DWORD flags;
+	uint32 no_frames_polled = 0;
+	uint32 no_frames_in_packet;
+	b32 packet_is_silence = FALSE;
+	
+	while (packet_length != 0)
+	{
+		HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetBuffer(&input_buffer, &no_frames_in_packet, &flags, NULL, NULL);
+		if (result == AUDCLNT_S_BUFFER_EMPTY)	//device buffer is empty
+		{
+			ASSERT(FALSE);
+			break;
+		}
+		ASSERT(result == S_OK);
+
+		if (pl.audio.input.is_loopback == TRUE)
+		{
+			if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY))
+			{
+				packet_is_silence = TRUE;
+				input_buffer = NULL;
+				//This flag is raised if on loopback and nothing is playing. Loopback is just silence. Treat as if silence.  
+			}
+			else
+			{
+				packet_is_silence = FALSE;
+			}
+		}
+		else if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
+		{
+			packet_is_silence = TRUE;
+			input_buffer = NULL;  // writing 0 (silence).
+			//write silence
+		}
+		else
+		{
+			packet_is_silence = FALSE;
+		}
+
+		if (packet_is_silence == TRUE)		//writing 0 to the ring buffer
+		{
+			//shifting buffer left to make room;	
+			int32 bytes_to_new_front = (pl.audio.input.format.buffer_frame_count - no_frames_in_packet) * bytes_per_frame;
+			memmove(rb, (uint8*)rb + (bytes_per_frame * no_frames_in_packet), bytes_to_new_front);
+			//setting packets at end to 0
+			memset((uint8*)rb + bytes_to_new_front, 0, no_frames_in_packet * bytes_per_frame);
+			no_frames_polled += no_frames_in_packet;
+		}
+		else
+		{	
+			//shifting left
+			int32 bytes_to_new_front = (pl.audio.input.format.buffer_frame_count - no_frames_in_packet) * bytes_per_frame;
+			memmove(rb, (uint8*)rb + (bytes_per_frame * no_frames_in_packet), bytes_to_new_front);
+			//copying packet to end of fifo buffer
+			memcpy((uint8*)rb + bytes_to_new_front, input_buffer, no_frames_in_packet * bytes_per_frame);
+			no_frames_polled += no_frames_in_packet;
+		}
+		//copy to input_buffer to cyclic buffer 
+
+		result = WIN32_SPECIFIC(pl)->input_capture_client->ReleaseBuffer(no_frames_in_packet);
+		ASSERT(result == S_OK);
+
+		result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
+		ASSERT(result == S_OK);
+	}
+	ASSERT(no_frames_polled <= pl.audio.input.format.buffer_frame_count);	//it spent more time polling than the buffer_duration_seconds
+	pl.audio.input.no_of_new_frames = no_frames_polled;
+
+	static uint32 frames_polled_since_last_buffer_fill = 0;
+	if (pl.audio.input.only_update_every_new_buffer)
+	{
+		frames_polled_since_last_buffer_fill += no_frames_polled;
+		if (frames_polled_since_last_buffer_fill >= pl.audio.input.format.buffer_frame_count)
+		{
+			frames_polled_since_last_buffer_fill = 0;
+			pl.audio.input.no_of_new_frames = pl.audio.input.format.buffer_frame_count;
+		}
+		else
+		{
+			return;
+		}
+	}
+	
+
+	//Adding polled audio frames into floating-point sink_buffer
+	if (pl.audio.input.no_of_new_frames != 0)	//adding the new frames to the sink_buffer
+	{
+		//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
+		int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
+		void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
+		memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames)* no_bytes_per_frame);
+
+		//NOTE: This is for setting the newest frame at the beginning of the sink buffer
+		//converting/transfering the newly added frames into floating point sink buffer from fixed point fifo buffer
+		if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 2)
+		{
+			int16* left_channel = (int16*)rb + ((pl.audio.input.format.buffer_frame_count-1) * 2);
+			int16* right_channel = left_channel + 1;
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+			{
+				*sink_front = ((f32)*left_channel) / 32767.f;
+				sink_front++;
+				*sink_front = ((f32)*right_channel) / 32767.f;
+				sink_front++;
+				left_channel -= 2;
+				right_channel -= 2;
+			}
+		}
+		else if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 1)
+		{
+			int16* single_channel = (int16*)rb + (pl.audio.input.format.buffer_frame_count - 1);
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+			{
+				*sink_front = ((f32)*single_channel) / 32767.f;
+				sink_front++;
+				single_channel--;
+			}
+		}
+		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 2)
+		{
+			int32* left_channel = (int32*)rb + ((pl.audio.input.format.buffer_frame_count - 1) * 2);
+			int32* right_channel = left_channel + 1;
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+			{
+				*sink_front = (f32)(((f64)*left_channel) / 2147483647.0);
+				sink_front++;
+				*sink_front = (f32)(((f64)*right_channel) / 2147483647.0);
+				sink_front++;
+				left_channel -= 2;
+				right_channel -= 2;
+			}
+		}
+		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 1)
+		{
+			int32* single_channel = (int32*)rb + (pl.audio.input.format.buffer_frame_count - 1);
+			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+			{
+				*sink_front = (f32)(((f64)*single_channel) / 2147483647.0);
+				sink_front++;
+				single_channel--;
+			}
+		}
+	}
+	
+}
+void PL_push_audio_render(PL& pl)
+{
+	//TODO: push out audio buffer to output device
+}
+
+//-------------------------------</Win32 Audio stuff>------------------------------------------
+
+
 
 
 //--------------------------------<Win32 ENTRY POINT>------------------------------------------
+//A platform's PL implementation has the job of creating a PL object and a platform_specific object in the main() 
+// and calling PL_entry_point to let the application handle how the initialization and game loop runs. 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 					_In_opt_ HINSTANCE hPrevInstance,
 					_In_ LPWSTR    lpCmdLine,
@@ -317,34 +676,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 	PL pl = {};
 	pl.platform_specific = &pl_win32;
 
-	PL_initialize(pl);
-	while (pl.running)
-	{
-		PL_poll(pl);
-		PL_update(pl);
-		PL_push(pl);
-	}
+	SYSTEM_INFO sys_info;
+	GetSystemInfo(&sys_info);
+	pl.core_count = sys_info.dwNumberOfProcessors;
+
+	PL_entry_point(pl);
 }
 //--------------------------------</Win32 ENTRY POINT>------------------------------------------
-
-
-void PL_initialize(PL& pl)
-{
-	pl.running = TRUE;
-	pl.initialized = FALSE;
-	PL_initialize_timing(pl);
-	PL_initialize_window(pl);
-	PL_initialize_bitmap(pl);
-	pl.initialized = TRUE;
-}
-
-void PL_poll(PL& pl)
-{
-	PL_poll_timing(pl);
-	PL_poll_window(pl);
-}
-
-void PL_push(PL &pl)
-{
-	PL_push_window(pl);
-}
+#undef WIN32_SPECIFIC

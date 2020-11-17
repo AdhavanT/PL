@@ -42,6 +42,8 @@ typedef int b32;
 typedef float f32;
 typedef double f64;
 //-----------------------------------------------
+struct PL;
+//-----------------------------------------------------<Timing>-----------------------------------------------------
 
 struct PL_Timing
 {
@@ -59,38 +61,109 @@ struct PL_Timing
 
 	f32 fdelta_seconds;
 };
+void PL_poll_timing(PL& pl);
+void PL_initialize_timing(PL& pl);
+//-----------------------------------------------------</Timing>----------------------------------------------------
 
+//-----------------------------------------------------<Input>------------------------------------------------------
+struct PL_Digital_Button
+{
+	b32 is_down;
+	b32 was_released;
+	b32 was_pressed;
+};
+struct PL_Input_Mouse
+{
+	b32 is_in_window;
+	int32 position_x;
+	int32 position_y;
+	PL_Digital_Button left;
+	PL_Digital_Button right;
+};
+struct PL_Input
+{
+	PL_Input_Mouse mouse;
+};
+void PL_poll_input(PL& pl);
+void PL_initialize_input(PL& pl);
+//-----------------------------------------------------</Input>-----------------------------------------------------
+
+//-----------------------------------------------------<Audio>------------------------------------------------------
+struct PL_Audio_Format
+{
+	uint32 no_channels;
+	uint32 no_bits_per_sample;
+	uint32 samples_per_second;				
+	uint32 buffer_frame_count;			    //The amount of frames (frames = sample size * no of channels) in the buffer. If this is 0, time will be used to calculate and create buffer
+	f32 buffer_duration_seconds;			//If this is 0, buffer_sample_size is used. if both are zero, this is 1.0(1 second).
+};
+ 
+struct PL_Audio_Output
+{
+	PL_Audio_Format format;
+};
+
+struct PL_Audio_Input
+{
+	uint32 no_of_new_frames;				//The number of incoming frames polled from last game loop
+	f32* sink_buffer;						//Newest frame is at front.
+	b32 is_loopback;
+	b32 only_update_every_new_buffer;
+	PL_Audio_Format format;
+};
+
+struct PL_Audio
+{
+	PL_Audio_Input input;
+	PL_Audio_Output output;
+};
+void PL_poll_audio_capture(PL& pl);		//for audio capture
+void PL_push_audio_render(PL& pl);		//for playing audio
+void PL_initialize_audio_capture(PL& pl);
+void PL_initialize_audio_render(PL& pl);
+//-----------------------------------------------------</Audio>----------------------------------------------------
+
+
+//-----------------------------------------------------<Bitmap>-----------------------------------------------------
 struct PL_Bitmap
 {
 	void* buffer;
-	int height;
-	int width;
-	int bytes_per_pixel;
-	int pitch;
+	uint32 height;
+	uint32 width;
+	uint32 bytes_per_pixel;
+	uint32 pitch;
 	uint32 size;
 };
+void PL_initialize_bitmap(PL& pl);
+//-----------------------------------------------------</Bitmap>----------------------------------------------------
 
+//-----------------------------------------------------<Window>-----------------------------------------------------
 struct PL_Window
 {
 	b32 was_altered;
-	int position_x;
-	int position_y;
-	int height;
-	int width;
+	int32 position_x;
+	int32 position_y;
+	uint32 height;
+	uint32 width;
 	char* title;
 };
+void PL_poll_window(PL& pl);
+void PL_push_window(PL& pl);
+void PL_initialize_window(PL& pl);
+//-----------------------------------------------------</Window>----------------------------------------------------
 
 struct PL
 {
+	uint32 core_count;
 	b32 initialized;
 	b32 running;
+	PL_Input input;
 	PL_Timing time;
+	PL_Audio audio;
 	PL_Window window;
 	PL_Bitmap bitmap;
+	void* general_memory;
 	void* platform_specific;
 };
 
-void PL_initialize(PL &pl); 
-void PL_poll(PL &pl);
-void PL_update(PL &pl);
-void PL_push( PL &pl);
+void PL_entry_point(PL& pl);
