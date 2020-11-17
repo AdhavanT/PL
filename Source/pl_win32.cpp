@@ -229,7 +229,7 @@ void PL_poll_window(PL &pl)
 
 		//FIXME: This clears the window to black on resizing to avoid the extra window(outside bitmap) from copying the previous frame. 
 		//It also causes random black frames while resizing.
-		//PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, BLACKNESS);
+		PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, BLACKNESS);
 	}
 
 	//TODO: get mouse input and stuff
