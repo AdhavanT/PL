@@ -72,7 +72,7 @@ struct PL_Digital_Button
 	b32 was_released;
 	b32 was_pressed;
 };
-struct PL_Mouse_Input
+struct PL_Input_Mouse
 {
 	b32 is_in_window;
 	int32 position_x;
@@ -82,7 +82,7 @@ struct PL_Mouse_Input
 };
 struct PL_Input
 {
-	PL_Mouse_Input mouse;
+	PL_Input_Mouse mouse;
 };
 void PL_poll_input(PL& pl);
 void PL_initialize_input(PL& pl);
@@ -117,9 +117,10 @@ struct PL_Audio
 	PL_Audio_Input input;
 	PL_Audio_Output output;
 };
-void PL_poll_audio(PL& pl);
-void PL_push_audio(PL& pl);
-void PL_initialize_audio(PL& pl);
+void PL_poll_audio_capture(PL& pl);		//for audio capture
+void PL_push_audio_render(PL& pl);		//for playing audio
+void PL_initialize_audio_capture(PL& pl);
+void PL_initialize_audio_render(PL& pl);
 //-----------------------------------------------------</Audio>----------------------------------------------------
 
 
@@ -161,6 +162,7 @@ struct PL
 	PL_Audio audio;
 	PL_Window window;
 	PL_Bitmap bitmap;
+	void* general_memory;
 	void* platform_specific;
 };
 
