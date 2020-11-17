@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <windowsx.h>
 #include <malloc.h>
 #include "pl.h"
 #include <stdio.h>
@@ -31,6 +32,7 @@ struct Win32Specific
 #define WIN32_SPECIFIC(x) ((Win32Specific*)x.platform_specific)
 
 //-------------------------------<win32 window stuff>----------------------------------------
+//Also handles Keyboard and Mouse input polling. 
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);//actual win32 message callback
 void static CALLBACK wnd_message_fiber_proc(PL& pl);//for switching to fiber that handles processing message callbacks
 void PL_initialize_window(PL& pl)
@@ -77,6 +79,7 @@ void PL_initialize_window(PL& pl)
 	wnd_class.lpszClassName = "pl_window_class";
 	wnd_class.style = CS_VREDRAW | CS_HREDRAW;
 	wnd_class.hInstance = WIN32_SPECIFIC(pl)->hInstance;
+	wnd_class.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(32515));
 
 	HRESULT s = RegisterClassA(&wnd_class);
 	ASSERT(s != 0);
@@ -150,17 +153,27 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 	}
 	switch (uMsg)
 	{
-		case WM_MOVE:
-		{
-			pl->window.was_altered = TRUE;
-
-		}break;
-
-		case WM_SIZE:
+		case WM_ENTERSIZEMOVE:
 		{
 			pl->window.was_altered = TRUE;	
+			SetTimer(hwnd, 1, 1, 0);
 		}break;
+		case WM_EXITSIZEMOVE:
+		{
+			pl->window.was_altered = FALSE;
+			KillTimer(hwnd, 1);
 
+		}break;
+		case WM_MOUSEMOVE:
+		{
+			POINT pos;
+			pos.x = GET_X_LPARAM(lParam);
+			pos.y = GET_Y_LPARAM(lParam);
+			pl->input.mouse.position_x = pos.x;
+			pl->input.mouse.position_y = pl->window.height - pos.y;	//to be consistant with bottom left being (0,0)
+			
+
+		}break;
 		case WM_KEYUP:
 		{
 			uint32 VKCode = wParam;
@@ -214,8 +227,11 @@ void PL_poll_window(PL &pl)
 		pl.window.position_x = window_position.x;
 		pl.window.position_y = window_position.y;
 
-		pl.window.was_altered = FALSE;
+		//FIXME: This clears the window to black on resizing to avoid the extra window(outside bitmap) from copying the previous frame. 
+		//It also causes random black frames while resizing.
+		//PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, BLACKNESS);
 	}
+
 	//TODO: get mouse input and stuff
 }
  
@@ -233,7 +249,10 @@ void PL_push_window(PL& pl)
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
 
-	//NOTE:Making sure to keep the buffer to monitor pixel mapping consistant. (not stretching the image to fit window.)
+	//clearing the screen to black before drawing
+	//PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, WHITENESS);
+
+	//NOTE:Making sure to keep the buffer-to-monitor pixel mapping consistant. (not stretching the image to fit window.)
 	StretchDIBits(
 		WIN32_SPECIFIC(pl)->main_monitor_DC,
 		0, 0, pl.bitmap.width, pl.bitmap.height,
@@ -281,6 +300,22 @@ void PL_initialize_timing(PL& pl)
 }
 
 //-------------------------------</timing stuff>----------------------------------------------
+
+//-------------------------------<Input stuff>------------------------------------------------
+//NOTE: For mouse input, WM_MOUSEMOVE is used. This is less precise than WM_INPUT and only changes on 
+//when the mouse moves to another pixel. Consider using raw mouse data from WM_INPUT for more 
+//high-definition mouse input for applications that need it. 
+void PL_initialize_input(PL& pl)
+{
+
+}
+
+void PL_poll_input(PL& pl)
+{
+
+}
+
+//-------------------------------</Input stuff>-----------------------------------------------
 
 //-------------------------------<bitmap stuff>-----------------------------------------------
 void PL_initialize_bitmap(PL& pl)
@@ -384,7 +419,7 @@ void PL_initialize_audio(PL& pl)
 
 	if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count == 0)
 	{
-		pl.audio.input.format.buffer_duration_seconds = 1.0f;	//ASSESS: Whether i should even allow the user not specify how big the buffer is. (should i assert here)
+		pl.audio.input.format.buffer_duration_seconds = 1.0f;
 	}
 	else if (pl.audio.input.format.buffer_duration_seconds == 0 && pl.audio.input.format.buffer_frame_count != 0)
 	{
@@ -422,11 +457,124 @@ void PL_initialize_audio(PL& pl)
 void PL_poll_audio(PL& pl)
 {
 
-	uint8 bytes_per_sample = pl.audio.input.format.no_bits_per_sample / 8;
-	uint8 bytes_per_frame = pl.audio.input.format.no_channels * bytes_per_sample;
+	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
 
 	RingBuffer* rb = &WIN32_SPECIFIC(pl)->input_ring_buffer;
 	f32* sink_front = pl.audio.input.sink_buffer;
+
+	//Polling audio framess
+	uint32 packet_length;
+	HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
+	ASSERT(result == S_OK);
+
+	uint8* input_buffer;
+	DWORD flags;
+	uint32 no_frames_polled = 0;
+	uint32 no_frames_in_packet;
+	b32 packet_is_silence = FALSE;
+	while (packet_length != 0)
+	{
+		HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetBuffer(&input_buffer, &no_frames_in_packet, &flags, NULL, NULL);
+		if (result == AUDCLNT_S_BUFFER_EMPTY)	//device buffer is empty
+		{
+			ASSERT(FALSE);
+			break;
+		}
+		ASSERT(result == S_OK);
+
+		if (pl.audio.input.is_loopback == TRUE)
+		{
+			if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY))
+			{
+				packet_is_silence = TRUE;
+				input_buffer = NULL;
+				//This flag is raised if on loopback and nothing is playing. Loopback is just silence. Treat as if silence.  
+			}
+			else
+			{
+				packet_is_silence = FALSE;
+			}
+		}
+		else if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
+		{
+			packet_is_silence = TRUE;
+			input_buffer = NULL;  // writing 0 (silence).
+			//write silence
+		}
+		else
+		{
+			packet_is_silence = FALSE;
+		}
+
+		if (packet_is_silence == TRUE)		//writing 0 to the ring buffer
+		{
+			int32 new_front = no_frames_in_packet + rb->front;
+			b32 fits = new_front <= rb->size;
+			if (fits)
+			{
+				void* to = (uint8*)rb->buffer_front + (bytes_per_frame * rb->front);
+				memset(to, 0, no_frames_in_packet * bytes_per_frame);
+				rb->front = new_front % rb->size;
+			}
+			else
+			{
+				uint32 fill_buffer = rb->size - rb->front;
+				void* to = (uint8*)rb->buffer_front + (rb->front * bytes_per_frame);
+				memset(to, 0, fill_buffer * bytes_per_frame);			//filling to end of buffer
+				rb->front = new_front - rb->size;
+				memset(rb->buffer_front, 0, bytes_per_frame * rb->front);	//filling remaining
+			}
+
+			no_frames_polled += no_frames_in_packet;
+		}
+		else
+		{
+			//adding it to the ring buffer
+			int32 new_front = no_frames_in_packet + rb->front;
+			b32 fits = new_front <= rb->size;
+			if (fits)
+			{
+				void* to = (uint8*)rb->buffer_front + (bytes_per_frame * rb->front);
+				memcpy(to, input_buffer, no_frames_in_packet * bytes_per_frame);
+				rb->front = new_front % rb->size;
+			}
+			else
+			{
+				uint32 fill_buffer = rb->size - rb->front;
+				void* to = (uint8*)rb->buffer_front + (rb->front * bytes_per_frame);
+				memcpy(to, input_buffer, fill_buffer * bytes_per_frame);			//filling to end of buffer
+				rb->front = new_front - rb->size;
+				memcpy(rb->buffer_front, input_buffer, bytes_per_frame * rb->front);	//filling remaining
+			}
+			no_frames_polled += no_frames_in_packet;
+		}
+		//copy to input_buffer to cyclic buffer 
+
+		result = WIN32_SPECIFIC(pl)->input_capture_client->ReleaseBuffer(no_frames_in_packet);
+		ASSERT(result == S_OK);
+
+		result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
+		ASSERT(result == S_OK);
+	}
+	ASSERT(no_frames_polled <= pl.audio.input.format.buffer_frame_count);	//it spent more time polling than the buffer_duration_seconds
+	pl.audio.input.no_of_new_frames = no_frames_polled;
+
+	static uint32 polled_since_last_frame = 0;
+	if (pl.audio.input.only_update_every_new_buffer)
+	{
+		polled_since_last_frame += no_frames_polled;
+		if (polled_since_last_frame >= pl.audio.input.format.buffer_frame_count)
+		{
+			polled_since_last_frame = 0;
+			pl.audio.input.no_of_new_frames = pl.audio.input.format.buffer_frame_count;
+		}
+		else
+		{
+			return;
+		}
+	}
+
+	//Adding polled audio frames into floating-point sink_buffer
 	if (pl.audio.input.no_of_new_frames != 0)	//adding the new frames to the sink_buffer
 	{
 		//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
@@ -437,10 +585,9 @@ void PL_poll_audio(PL& pl)
 		{
 			sink_front[i + no_floats_to_shift] = sink_front[i];	//resverse to shift left
 		}
-
 		//NOTE: This is for a forward buffer where the newest frame is at the beginning of the sink buffer
 		//converting/transfering the newly added frames into floating point sink buffer from fixed point ring buffer
-		if (bytes_per_sample == 2 && pl.audio.input.format.no_channels == 2)
+		if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 2)
 		{
 			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
 			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
@@ -489,7 +636,7 @@ void PL_poll_audio(PL& pl)
 				
 			}
 		}
-		if (bytes_per_sample == 2 && pl.audio.input.format.no_channels == 1)
+		else if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 1)
 		{
 			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
 			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
@@ -524,173 +671,110 @@ void PL_poll_audio(PL& pl)
 					}
 				}
 			}
-			//This copies the whole buffer
-			////copy the oldest first (frames from rb->front to rb->end)
-			//int16* single_channel = (int16*)((uint8*)rb->buffer_front + bytes_per_frame * rb->front);
-			//for (int32 i = rb->front; i < rb->size; i++)
-			//{
-			//	*sink_front = ((f32)*single_channel) / 32767.f;
-			//	single_channel++;
-			//	sink_front++;
-			//}
-			//single_channel = (int16*)(rb->buffer_front);
-			//for (int32 i = 0; i < rb->front; i++)
-			//{
-			//	*sink_front = ((f32)*single_channel) / 32767.f;
-			//	single_channel++;
-			//	sink_front++;
-			//}
 		}
-
-#if 0	//without shifting and adding only new frames
-		f32* sink_front = pl.audio.input.sink_buffer;
-		if (bytes_per_sample == 2 && pl.audio.input.format.no_channels == 2)
+		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 1)
 		{
-			//filling buffer with first of cycled buffer. (must fill backwards to preserve FIFO order)
-			int16* left_channel = (int16*)((uint8*)rb->buffer_front + bytes_per_frame * rb->front);
-			int16* right_channel = left_channel + 1;
-			left_channel -= 2;
-			right_channel -= 2;
-			for (uint32 i = rb->front; i > 0; i--)
+			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
+			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
 			{
-				*sink_front = (f32)*left_channel / 32767.f;
-				sink_front++;
-				left_channel -= 2;
-				*sink_front = (f32)*right_channel / 32767.f;
-				right_channel -= 2;
-				sink_front++;
+				int32* single_channel = (int32*)(rb->buffer_front);
+				single_channel = single_channel + rb->front - 1;	//-1 to account for rb->front pointing the the last frame not, the first. 
+				for (int32 i = pl.audio.input.no_of_new_frames; i > 0; i--)
+				{
+					f64 for_buffer;
+					for_buffer = ((f64)*single_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					single_channel--;
+					sink_front++;
+				}
 			}
-			//filling remaining of buffer
-			left_channel = (int16*)((uint8*)rb->buffer_front + (bytes_per_frame * rb->front));
-			right_channel = left_channel + 1;
-			for (uint32 i = rb->front; i < rb->size; i++)
+			else   //need to read front front of ring buffer then cycle back to end to front agian. 
 			{
-				*sink_front = ((f32)*left_channel) / 32767.f;
-				sink_front++;
-				left_channel += 2;
-				*sink_front = ((f32)*right_channel) / 32767.f;
-				right_channel += 2;
-				sink_front++;
+				int32* single_channel = (int32*)(rb->buffer_front);
+				single_channel = single_channel + rb->front - 1;	//-1 to account for rb->front pointing the the last frame not, the first. 
+				for (int32 i = rb->front; i > 0; i--)
+				{
+					f64 for_buffer;
+					for_buffer = ((f64)*single_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					single_channel--;
+					sink_front++;
+				}
+				single_channel = (int32*)(rb->buffer_front);
+				single_channel = single_channel + rb->size - 1;
+				{
+					for (int32 i = -frames_from_front; i > 0; i--)	//-frames_from_front is the remaining new_frames after sampling from front
+					{
+						f64 for_buffer;
+						for_buffer = ((f64)*single_channel) / 2147483647.0;
+						*sink_front = (f32)for_buffer;
+						single_channel--;
+						sink_front++;
+					}
+				}
 			}
 		}
-		if (bytes_per_sample == 2 && pl.audio.input.format.no_channels == 1)
+		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 2)
 		{
-			int16* single_channel = (int16*)((uint8*)rb->buffer_front + bytes_per_frame * rb->front);
-			single_channel -= 1;
-			for (uint32 i = rb->front; i > 0; i--)
+			int32 frames_from_front = rb->front - pl.audio.input.no_of_new_frames;
+			if (frames_from_front >= 0)	//the amount polled is still in beginning of buffer. no need to get from cycle
 			{
-				*sink_front = ((f32)*single_channel) / 32767.f;
-				single_channel--;
-				sink_front++;
+				int32* left_channel = (int32*)(rb->buffer_front);
+				left_channel = left_channel + 2 * (rb->front - 1);	//-1 to account for rb->front pointing the the last frame not, the first. 
+				int32* right_channel = left_channel + 1;
+				for (int32 i = pl.audio.input.no_of_new_frames; i > 0; i--)
+				{
+					f64 for_buffer;
+					for_buffer = ((f64)*left_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					sink_front++;
+					for_buffer = ((f64)*right_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					sink_front++;
+					left_channel -= 2;
+					right_channel -= 2;
+				}
 			}
-			single_channel = (int16*)((uint8*)rb->buffer_front + (bytes_per_frame * rb->front));
-			for (uint32 i = rb->front; i < rb->size; i++)
+			else   //need to read front front of ring buffer then cycle back to end to front agian. 
 			{
-				*sink_front = ((f32)*single_channel) / 32767.f;
-				single_channel++;
-				sink_front++;
+				int32* left_channel = (int32*)(rb->buffer_front);
+				left_channel = left_channel + 2 * (rb->front - 1);	//-1 to account for rb->front pointing the the last frame not, the first. 
+				int32* right_channel = left_channel + 1;
+				for (int32 i = rb->front; i > 0; i--)
+				{
+					f64 for_buffer;
+					for_buffer = ((f64)*left_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					sink_front++;
+					for_buffer = ((f64)*right_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					sink_front++;
+					left_channel -= 2;
+					right_channel -= 2;
+				}
+
+				left_channel = (int32*)(rb->buffer_front);
+				left_channel = left_channel + 2 * (rb->size - 1);
+				right_channel = left_channel + 1;
+
+				for (int32 i = -frames_from_front; i > 0; i--)	//-frames_from_front is the remaining new_frames after sampling from front
+				{
+					f64 for_buffer;
+					for_buffer = ((f64)*left_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					sink_front++;
+					for_buffer = ((f64)*right_channel) / 2147483647.0;
+					*sink_front = (f32)for_buffer;
+					sink_front++;
+					left_channel -= 2;
+					right_channel -= 2;
+				}
+
 			}
 		}
-
-#endif 		
 	}
 	
-	uint32 packet_length;
-	HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
-	ASSERT(result == S_OK);
-
-	uint8* input_buffer;
-	DWORD flags;
-	uint32 no_frames_polled = 0;
-	uint32 no_frames_in_packet;
-	b32 packet_is_silence = FALSE;
-	while (packet_length != 0)
-	{
-		HRESULT result = WIN32_SPECIFIC(pl)->input_capture_client->GetBuffer(&input_buffer, &no_frames_in_packet, &flags, NULL, NULL);
-		if (result == AUDCLNT_S_BUFFER_EMPTY)	//device buffer is empty
-		{
-			ASSERT(FALSE);
-			break;
-		}
-		ASSERT(result == S_OK);
-
-		if (pl.audio.input.is_loopback == TRUE)
-		{
-			if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY))
-			{
-				packet_is_silence = TRUE;
-				input_buffer = NULL;
-				//This flag is raised if on loopback and nothing is playing. Loopback is just silence. Treat as if silence.  
-				//ASSESS: whether a better implementation would be to play silence in background as to not avoid actual AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY flags.
-			}
-			else
-			{
-				packet_is_silence = FALSE;
-			}
-		}
-		else if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
-		{
-			packet_is_silence = TRUE;
-			input_buffer = NULL;  // writing 0 (silence).
-			//write silence
-		}
-		else
-		{
-			packet_is_silence = FALSE;
-		}
-
-		if (packet_is_silence == TRUE)		//writing 0 to the ring buffer
-		{
-			int32 new_front = no_frames_in_packet + rb->front;
-			b32 fits = new_front <= rb->size;
-			if (fits)
-			{
-				void* to = (uint8*)rb->buffer_front + (bytes_per_frame * rb->front);
-				memset(to, 0, no_frames_in_packet * bytes_per_frame);
-				rb->front = new_front % rb->size;
-			}
-			else
-			{
-				uint32 fill_buffer = rb->size - rb->front;
-				void* to = (uint8*)rb->buffer_front + (rb->front * bytes_per_frame);
-				memset(to, 0, fill_buffer * bytes_per_frame);			//filling to end of buffer
-				rb->front = new_front - rb->size;
-				memset(rb->buffer_front, 0,bytes_per_frame * rb->front);	//filling remaining
-			}
-
-			no_frames_polled += no_frames_in_packet;
-		}
-		else
-		{
-			//adding it to the ring buffer
-			int32 new_front = no_frames_in_packet + rb->front;
-			b32 fits = new_front <= rb->size;
-			if (fits)
-			{
-				void* to = (uint8*)rb->buffer_front + (bytes_per_frame * rb->front);
-				memcpy(to, input_buffer, no_frames_in_packet * bytes_per_frame);
-				rb->front = new_front % rb->size;
-			}
-			else
-			{
-				uint32 fill_buffer = rb->size - rb->front;
-				void* to = (uint8*)rb->buffer_front + (rb->front * bytes_per_frame);
-				memcpy(to, input_buffer, fill_buffer * bytes_per_frame);			//filling to end of buffer
-				rb->front = new_front - rb->size;
-				memcpy(rb->buffer_front, input_buffer, bytes_per_frame * rb->front);	//filling remaining
-			}
-			no_frames_polled += no_frames_in_packet;
-		}
-		//copy to input_buffer to cyclic buffer 
-
-		result = WIN32_SPECIFIC(pl)->input_capture_client->ReleaseBuffer(no_frames_in_packet);
-		ASSERT(result == S_OK);
-
-		result = WIN32_SPECIFIC(pl)->input_capture_client->GetNextPacketSize(&packet_length);
-		ASSERT(result == S_OK);
-	}
-	ASSERT(no_frames_polled <= pl.audio.input.format.buffer_frame_count);	//it spent more time polling than the buffer_duration_seconds
-	pl.audio.input.no_of_new_frames = no_frames_polled;
+	
 	//TODO: retrieve audio buffer from input device
 	//TODO: make the input buffer a circular buffer that collects input packets on a seperate thread till frame end and then waits for half a frame then starts reading into buffer again.
 }
@@ -717,6 +801,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 	
 	PL pl = {};
 	pl.platform_specific = &pl_win32;
+
+	SYSTEM_INFO sys_info;
+	GetSystemInfo(&sys_info);
+	pl.core_count = sys_info.dwNumberOfProcessors;
 
 	PL_entry_point(pl);
 }
