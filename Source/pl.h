@@ -42,7 +42,9 @@ typedef int b32;
 typedef float f32;
 typedef double f64;
 //-----------------------------------------------
+#include "pl_config.h"
 struct PL;
+typedef void(*PL_Function)(PL& pl);	//used for functions that are different for different modes. Ex: PL_push_window() is different for opengl and for bit-blitting using a bitmap. 
 //-----------------------------------------------------<Timing>-----------------------------------------------------
 
 struct PL_Timing
@@ -102,6 +104,9 @@ struct PL_Audio_Output
 {
 	PL_Audio_Format format;
 };
+void PL_initialize_audio_render(PL& pl);
+void PL_push_audio_render(PL& pl);		//for playing audio
+void PL_cleanup_audio_render(PL& pl);
 
 struct PL_Audio_Input
 {
@@ -111,35 +116,37 @@ struct PL_Audio_Input
 	b32 only_update_every_new_buffer;
 	PL_Audio_Format format;
 };
+void PL_initialize_audio_capture(PL& pl);
+void PL_poll_audio_capture(PL& pl);		//for audio capture
+void PL_cleanup_audio_capture(PL& pl);
 
 struct PL_Audio
 {
 	PL_Audio_Input input;
 	PL_Audio_Output output;
 };
-void PL_poll_audio_capture(PL& pl);		//for audio capture
-void PL_push_audio_render(PL& pl);		//for playing audio
-void PL_initialize_audio_capture(PL& pl);
-void PL_initialize_audio_render(PL& pl);
+
 //-----------------------------------------------------</Audio>----------------------------------------------------
 
 
-//-----------------------------------------------------<Bitmap>-----------------------------------------------------
-struct PL_Bitmap
-{
-	void* buffer;
-	uint32 height;
-	uint32 width;
-	uint32 bytes_per_pixel;
-	uint32 pitch;
-	uint32 size;
-};
-void PL_initialize_bitmap(PL& pl);
-//-----------------------------------------------------</Bitmap>----------------------------------------------------
-
 //-----------------------------------------------------<Window>-----------------------------------------------------
+
 struct PL_Window
 {
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	struct PL_Window_Bitmap_Format
+	{
+		void* buffer;
+		uint32 height;
+		uint32 width;
+		uint32 bytes_per_pixel;
+		uint32 pitch;
+		uint32 size;
+	};
+	PL_Window_Bitmap_Format window_bitmap;
+#elif PL_WINDOW_RENDERTYPE == PL_OPENGL
+	//opengl context stuff
+#endif
 	b32 was_altered;
 	int32 position_x;
 	int32 position_y;
@@ -150,6 +157,7 @@ struct PL_Window
 void PL_poll_window(PL& pl);
 void PL_push_window(PL& pl);
 void PL_initialize_window(PL& pl);
+void PL_cleanup_window(PL& pl);
 //-----------------------------------------------------</Window>----------------------------------------------------
 
 struct PL
@@ -161,9 +169,11 @@ struct PL
 	PL_Timing time;
 	PL_Audio audio;
 	PL_Window window;
-	PL_Bitmap bitmap;
 	void* general_memory;
 	void* platform_specific;
 };
 
 void PL_entry_point(PL& pl);
+
+#define PL_CONFIG_UNDEF
+#include"pl_config.h"

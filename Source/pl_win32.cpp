@@ -1,25 +1,29 @@
+#include "pl.h"
+#include "pl_config.h"
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <windowsx.h>
 #include <malloc.h>
-#include "pl.h"
 #include <stdio.h>
 
 struct Win32Specific
 {
 	HINSTANCE hInstance;
 	//Window stuff
-	BITMAPINFO bmi_header;
 	HDC main_monitor_DC;
 	HWND wnd_handle;
 	void* main_fiber;
 	void* message_fiber;
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	BITMAPINFO window_bmi_header;
+#endif
 
-	//Audio stuff
-	IAudioClient *input;
+	//Audio Capture Stuff
 	void* input_fifo_buffer;
 	IAudioCaptureClient* input_capture_client;
+	void (*transfer_to_sink_buffer)(PL& pl);
+	//Audio Render Stuff
 	IAudioClient *output;
 };
 #define WIN32_SPECIFIC(x) ((Win32Specific*)x.platform_specific)
@@ -30,6 +34,7 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 void static CALLBACK wnd_message_fiber_proc(PL& pl);//for switching to fiber that handles processing message callbacks
 void PL_initialize_window(PL& pl)
 {
+
 	int window_width, window_height;
 	if (pl.window.height == 0)	//uninitialized
 	{
@@ -52,7 +57,7 @@ void PL_initialize_window(PL& pl)
 	{
 		pl.window.title = (char*)"Win32 PL test";
 	}
-
+	
 	if (window_width != CW_USEDEFAULT && window_height != CW_USEDEFAULT)
 	{
 		RECT window_rectangle;
@@ -96,7 +101,6 @@ void PL_initialize_window(PL& pl)
 
 	//This passes a pointer to pl to the wnd_proc message callback. (It's retrieved by GetWindowLongPtrA(hwnd, GWLP_USERDATA))
 	SetWindowLongPtrA(WIN32_SPECIFIC(pl)->wnd_handle, GWL_USERDATA, (LONG_PTR)&pl);
-	PL* re = (PL*)GetWindowLongPtrA(WIN32_SPECIFIC(pl)->wnd_handle, GWLP_USERDATA);
 	
 	WIN32_SPECIFIC(pl)->main_fiber = ConvertThreadToFiber(0);
 	ASSERT(WIN32_SPECIFIC(pl)->main_fiber);
@@ -106,8 +110,35 @@ void PL_initialize_window(PL& pl)
 	WIN32_SPECIFIC(pl)->main_monitor_DC = GetDC(WIN32_SPECIFIC(pl)->wnd_handle);
 
 
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	if (pl.window.window_bitmap.height == 0 || pl.window.window_bitmap.width == 0)	//uninitialized
+	{
+		pl.window.window_bitmap.height = pl.window.height;
+		pl.window.window_bitmap.width = pl.window.width;
+	}
+	if (pl.window.window_bitmap.bytes_per_pixel == 0)
+	{
+		pl.window.window_bitmap.bytes_per_pixel = 4;
+	}
+	pl.window.window_bitmap.pitch = pl.window.window_bitmap.bytes_per_pixel * pl.window.window_bitmap.width;
+	pl.window.window_bitmap.size = pl.window.window_bitmap.pitch * pl.window.window_bitmap.height;
+
+	if ((pl.window.window_bitmap.buffer == 0) && (pl.window.window_bitmap.size != 0))
+	{
+		pl.window.window_bitmap.buffer = malloc(pl.window.window_bitmap.size);
+	}
+	ASSERT(pl.window.window_bitmap.buffer);
+
+	BITMAPINFO* bmi = &WIN32_SPECIFIC(pl)->window_bmi_header;
+	bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
+	bmi->bmiHeader.biBitCount = 8 * pl.window.window_bitmap.bytes_per_pixel;
+	bmi->bmiHeader.biCompression = BI_RGB;
+	bmi->bmiHeader.biPlanes = 1;
+	bmi->bmiHeader.biHeight = pl.window.window_bitmap.height;
+	bmi->bmiHeader.biWidth = pl.window.window_bitmap.width;
+#endif
+
 	PL_poll_window(pl);
-	
 
 }
 
@@ -133,7 +164,6 @@ void CALLBACK wnd_message_fiber_proc(PL& pl)
 		SwitchToFiber(WIN32_SPECIFIC(pl)->main_fiber);
 	}
 	SwitchToFiber(WIN32_SPECIFIC(pl)->main_fiber);
-
 } 
 
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -220,12 +250,13 @@ void PL_poll_window(PL &pl)
 		pl.window.position_x = window_position.x;
 		pl.window.position_y = window_position.y;
 
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
 		//FIXME: This clears the window to black on resizing to avoid the extra window(outside bitmap) from copying the previous frame. 
 		//It also causes random black frames while resizing.
 		PatBlt(WIN32_SPECIFIC(pl)->main_monitor_DC, 0, 0, pl.window.width, pl.window.height, BLACKNESS);
+#endif
 	}
 
-	//TODO: get mouse input and stuff
 }
  
 //this updates the window by bliting the bitmap to the screen. So...sorta PL_push_bitmap() also.
@@ -242,19 +273,38 @@ void PL_push_window(PL& pl)
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
 
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
 	//NOTE:Making sure to keep the buffer-to-monitor pixel mapping consistant. (not stretching the image to fit window.)
+	//NOTE: This is assuming the window is drawing a bitmap 
 	StretchDIBits(
 		WIN32_SPECIFIC(pl)->main_monitor_DC,
-		0, 0, pl.bitmap.width, pl.bitmap.height,
-		0, 0, pl.bitmap.width, pl.bitmap.height,
-		pl.bitmap.buffer,
-		&WIN32_SPECIFIC(pl)->bmi_header,
+		0, 0, pl.window.window_bitmap.width, pl.window.window_bitmap.height,
+		0, 0, pl.window.window_bitmap.width, pl.window.window_bitmap.height,
+		pl.window.window_bitmap.buffer,
+		&WIN32_SPECIFIC(pl)->window_bmi_header,
 		DIB_RGB_COLORS, SRCCOPY);
+#endif
+}
+
+void PL_cleanup_window(PL& pl)
+{
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	free(pl.window.window_bitmap.buffer);
+#endif
 }
 
 //-------------------------------</win32 window stuff>----------------------------------------
 
 //-------------------------------<timing stuff>-----------------------------------------------
+void PL_initialize_timing(PL& pl)
+{
+	LARGE_INTEGER frequency;
+	QueryPerformanceFrequency(&frequency);
+	pl.time.cycles_per_second = frequency.QuadPart;
+
+	PL_poll_timing(pl);	//To avoid the first frame having wierd 0 delta and current time values.
+}
+
 void PL_poll_timing(PL& pl)
 {
 	LARGE_INTEGER new_q; 
@@ -280,15 +330,6 @@ void PL_poll_timing(PL& pl)
 	pl.time.current_micros = tmp_cmic;
 }
 
-void PL_initialize_timing(PL& pl)
-{
-	LARGE_INTEGER frequency;
-	QueryPerformanceFrequency(&frequency);
-	pl.time.cycles_per_second = frequency.QuadPart;
-
-	PL_poll_timing(pl);	//To avoid the first frame having wierd 0 delta and current time values.
-}
-
 //-------------------------------</timing stuff>----------------------------------------------
 
 //-------------------------------<Input stuff>------------------------------------------------
@@ -307,48 +348,15 @@ void PL_poll_input(PL& pl)
 
 //-------------------------------</Input stuff>-----------------------------------------------
 
-//-------------------------------<bitmap stuff>-----------------------------------------------
-void PL_initialize_bitmap(PL& pl)
-{
-	if (pl.bitmap.height == 0)	//uninitialized
-	{
-		pl.bitmap.height = pl.window.height;	//assuming PL_initialized_window() happens before
-	}
-	if (pl.bitmap.width == 0)
-	{
-		pl.bitmap.width = pl.window.width;
-	}
-	if (pl.bitmap.bytes_per_pixel == 0)
-	{
-		pl.bitmap.bytes_per_pixel = 4;
-	}
-	pl.bitmap.pitch = pl.bitmap.bytes_per_pixel * pl.bitmap.width;
-	pl.bitmap.size = pl.bitmap.pitch * pl.bitmap.height;
-
-	if ((pl.bitmap.buffer == 0) && (pl.bitmap.size != 0))
-	{
-		pl.bitmap.buffer = malloc(pl.bitmap.size);
-	}
-	ASSERT(pl.bitmap.buffer);
-
-	BITMAPINFO* bmi = &WIN32_SPECIFIC(pl)->bmi_header;
-	bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
-	bmi->bmiHeader.biBitCount = 8 * pl.bitmap.bytes_per_pixel;
-	bmi->bmiHeader.biCompression = BI_RGB;
-	bmi->bmiHeader.biPlanes = 1;
-	bmi->bmiHeader.biHeight = pl.bitmap.height;
-	bmi->bmiHeader.biWidth = pl.bitmap.width;
-
-}
-//-------------------------------</bitmap stuff>-----------------------------------------------
-
 //-------------------------------<Win32 Audio stuff>-------------------------------------------
+//-------------------------------<Audio Render stuff>--------------------------------------
+
 void PL_initialize_audio_render(PL& pl)
 {
 	CoInitializeEx(0, COINIT_MULTITHREADED);//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
 	IMMDeviceEnumerator* pEnumerator = 0;
 	IMMDevice* output_endpoint = 0;
-	IAudioClient** output_audio_client = &WIN32_SPECIFIC(pl)->output;
+	IAudioClient* output_audio_client;
 
 	HRESULT result;
 	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
@@ -357,14 +365,14 @@ void PL_initialize_audio_render(PL& pl)
 	result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &output_endpoint);
 	ASSERT(result == S_OK);
 
-	result = output_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)output_audio_client);
+	result = output_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)&output_audio_client);
 	ASSERT(result == S_OK);
 
 	WAVEFORMATEX of = {};
 	DWORD output_stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
 	WAVEFORMATEX* q_of;
 
-	(*output_audio_client)->GetMixFormat(&q_of);
+	(output_audio_client)->GetMixFormat(&q_of);
 
 	//setting defaults (non-initialized values in format)
 	if (pl.audio.input.format.no_bits_per_sample == 0)
@@ -387,7 +395,28 @@ void PL_initialize_audio_render(PL& pl)
 	of.nAvgBytesPerSec = pl.audio.output.format.samples_per_second * of.nBlockAlign;
 	of.wBitsPerSample = pl.audio.output.format.no_bits_per_sample;
 
+	CoTaskMemFree(q_of);
+	pEnumerator->Release();
+	output_endpoint->Release();
+	output_audio_client->Release();
 }
+
+void PL_push_audio_render(PL& pl)
+{
+	//TODO: push out audio buffer to output device
+}
+void PL_cleanup_audio_render(PL& pl)
+{
+
+}
+//-------------------------------</Audio Render stuff>--------------------------------------
+
+//-------------------------------<Audio Capture stuff>--------------------------------------
+//functions responsible for shifting the sink_buffer and adding the new frames polled from the fifo buffer
+static void transfer_capture_16bit_2channel(PL& pl);
+static void transfer_capture_16bit_1channel(PL& pl);
+static void transfer_capture_32bit_2channel(PL& pl);
+static void transfer_capture_32bit_1channel(PL& pl);
 
 void PL_initialize_audio_capture(PL& pl)
 {
@@ -396,14 +425,11 @@ void PL_initialize_audio_capture(PL& pl)
 
 	IMMDevice* input_endpoint = 0;
 
-	IAudioClient** input_audio_client = &WIN32_SPECIFIC(pl)->input;
-
+	IAudioClient* input_audio_client;
 
 	HRESULT result;
 	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
 	ASSERT(!FAILED(result));
-
-	
 
 	if (pl.audio.input.is_loopback)
 	{
@@ -418,14 +444,14 @@ void PL_initialize_audio_capture(PL& pl)
 
 	
 
-	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)input_audio_client);
+	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)&input_audio_client);
 	ASSERT(result == S_OK);
 
 
 	WAVEFORMATEX ipf = {};
 	DWORD input_stream_flags = AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
 	WAVEFORMATEX *q_ipf;
-	(*input_audio_client)->GetMixFormat(&q_ipf);
+	(input_audio_client)->GetMixFormat(&q_ipf);
 
 	//setting defaults (non-initialized values in format)
 	if (pl.audio.input.format.no_bits_per_sample == 0)
@@ -468,19 +494,19 @@ void PL_initialize_audio_capture(PL& pl)
 	}
 
 	uint32 duration = (uint32)(pl.audio.input.format.buffer_duration_seconds * (f32)REFTIMES_PER_SEC);
-	result = (*input_audio_client)->Initialize(AUDCLNT_SHAREMODE_SHARED, input_stream_flags, duration, 0, &ipf, 0);
+	result = (input_audio_client)->Initialize(AUDCLNT_SHAREMODE_SHARED, input_stream_flags, duration, 0, &ipf, 0);
 	ASSERT(result == S_OK);
 
-	result = (*input_audio_client)->GetBufferSize(&pl.audio.input.format.buffer_frame_count);
+	result = (input_audio_client)->GetBufferSize(&pl.audio.input.format.buffer_frame_count);
 	ASSERT(result == S_OK);
 
 	pl.audio.input.format.buffer_duration_seconds = (f32)pl.audio.input.format.buffer_frame_count / (f32)pl.audio.input.format.samples_per_second;
 	#undef REFTIMES_PER_SEC
 
-	result = (*input_audio_client)->GetService(__uuidof(IAudioCaptureClient), (void**)&WIN32_SPECIFIC(pl)->input_capture_client);
+	result = (input_audio_client)->GetService(__uuidof(IAudioCaptureClient), (void**)&WIN32_SPECIFIC(pl)->input_capture_client);
 	ASSERT(result == S_OK);
 
-	result = (*input_audio_client)->Start();
+	result = (input_audio_client)->Start();
 	ASSERT(result == S_OK);
 
 	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
@@ -489,17 +515,121 @@ void PL_initialize_audio_capture(PL& pl)
 
 	pl.audio.input.sink_buffer = (f32*)calloc(1,pl.audio.input.format.buffer_frame_count * sizeof(f32) * pl.audio.input.format.no_channels);
 
+	CoTaskMemFree(q_ipf);
+	pEnumerator->Release();
+	input_endpoint->Release();
+	input_audio_client->Release();
+
+	if (pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 2)
+	{
+		WIN32_SPECIFIC(pl)->transfer_to_sink_buffer = transfer_capture_16bit_2channel;
+	}
+	else if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 1)
+	{
+		WIN32_SPECIFIC(pl)->transfer_to_sink_buffer = transfer_capture_16bit_1channel;
+	}
+	else if (pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 2)
+	{
+		WIN32_SPECIFIC(pl)->transfer_to_sink_buffer = transfer_capture_32bit_2channel;
+	}
+	else if (pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 1)
+	{
+		WIN32_SPECIFIC(pl)->transfer_to_sink_buffer = transfer_capture_32bit_1channel;
+	}
+	else
+	{
+		ASSERT(FALSE);	//non-supported audio bit-rate, channel format
+	}
 	PL_poll_audio_capture(pl);
 }
 
+//functions responsible for shifting the sink_buffer and adding the new frames polled from the fifo buffer
+static void transfer_capture_16bit_2channel(PL& pl)
+{
+	f32* sink_front = pl.audio.input.sink_buffer;
+	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
+
+	//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
+	int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
+	void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
+	memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames) * no_bytes_per_frame);
+
+	int16* left_channel = (int16*)rb + ((pl.audio.input.format.buffer_frame_count - 1) * 2);
+	int16* right_channel = left_channel + 1;
+	for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+	{
+		*sink_front = ((f32)*left_channel) / 32767.f;
+		sink_front++;
+		*sink_front = ((f32)*right_channel) / 32767.f;
+		sink_front++;
+		left_channel -= 2;
+		right_channel -= 2;
+	}
+}
+static void transfer_capture_16bit_1channel(PL& pl)
+{
+	f32* sink_front = pl.audio.input.sink_buffer;
+	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
+
+	//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
+	int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
+	void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
+	memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames) * no_bytes_per_frame);
+
+	int16* single_channel = (int16*)rb + (pl.audio.input.format.buffer_frame_count - 1);
+	for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+	{
+		*sink_front = ((f32)*single_channel) / 32767.f;
+		sink_front++;
+		single_channel--;
+	}
+}
+static void transfer_capture_32bit_2channel(PL& pl)
+{
+	f32* sink_front = pl.audio.input.sink_buffer;
+	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
+
+	//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
+	int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
+	void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
+	memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames) * no_bytes_per_frame);
+
+	int32* left_channel = (int32*)rb + ((pl.audio.input.format.buffer_frame_count - 1) * 2);
+	int32* right_channel = left_channel + 1;
+	for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+	{
+		*sink_front = (f32)(((f64)*left_channel) / 2147483647.0);
+		sink_front++;
+		*sink_front = (f32)(((f64)*right_channel) / 2147483647.0);
+		sink_front++;
+		left_channel -= 2;
+		right_channel -= 2;
+	}
+}
+static void transfer_capture_32bit_1channel(PL& pl)
+{
+	f32* sink_front = pl.audio.input.sink_buffer;
+	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
+
+	//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
+	int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
+	void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
+	memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames) * no_bytes_per_frame);
+
+	int32* single_channel = (int32*)rb + (pl.audio.input.format.buffer_frame_count - 1);
+	for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
+	{
+		*sink_front = (f32)(((f64)*single_channel) / 2147483647.0);
+		sink_front++;
+		single_channel--;
+	}
+}
 
 void PL_poll_audio_capture(PL& pl)
 {
-
 	uint8 bytes_per_frame = pl.audio.input.format.no_channels * (pl.audio.input.format.no_bits_per_sample / 8);
 
 	void* rb = WIN32_SPECIFIC(pl)->input_fifo_buffer;
-	f32* sink_front = pl.audio.input.sink_buffer;
 
 	//Polling audio frames
 	uint32 packet_length;
@@ -594,68 +724,18 @@ void PL_poll_audio_capture(PL& pl)
 	//Adding polled audio frames into floating-point sink_buffer
 	if (pl.audio.input.no_of_new_frames != 0)	//adding the new frames to the sink_buffer
 	{
-		//shifting existing buffer to right to make room for new frames that are added at beginning of buffer
-		int32 no_bytes_per_frame = sizeof(f32) * pl.audio.input.format.no_channels;
-		void* sink_end = (uint8*)sink_front + (no_bytes_per_frame * pl.audio.input.no_of_new_frames);
-		memmove(sink_end, (void*)sink_front, (pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames)* no_bytes_per_frame);
-
-		//NOTE: This is for setting the newest frame at the beginning of the sink buffer
-		//converting/transfering the newly added frames into floating point sink buffer from fixed point fifo buffer
-		if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 2)
-		{
-			int16* left_channel = (int16*)rb + ((pl.audio.input.format.buffer_frame_count-1) * 2);
-			int16* right_channel = left_channel + 1;
-			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
-			{
-				*sink_front = ((f32)*left_channel) / 32767.f;
-				sink_front++;
-				*sink_front = ((f32)*right_channel) / 32767.f;
-				sink_front++;
-				left_channel -= 2;
-				right_channel -= 2;
-			}
-		}
-		else if(pl.audio.input.format.no_bits_per_sample == 16 && pl.audio.input.format.no_channels == 1)
-		{
-			int16* single_channel = (int16*)rb + (pl.audio.input.format.buffer_frame_count - 1);
-			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
-			{
-				*sink_front = ((f32)*single_channel) / 32767.f;
-				sink_front++;
-				single_channel--;
-			}
-		}
-		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 2)
-		{
-			int32* left_channel = (int32*)rb + ((pl.audio.input.format.buffer_frame_count - 1) * 2);
-			int32* right_channel = left_channel + 1;
-			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
-			{
-				*sink_front = (f32)(((f64)*left_channel) / 2147483647.0);
-				sink_front++;
-				*sink_front = (f32)(((f64)*right_channel) / 2147483647.0);
-				sink_front++;
-				left_channel -= 2;
-				right_channel -= 2;
-			}
-		}
-		else if(pl.audio.input.format.no_bits_per_sample == 32 && pl.audio.input.format.no_channels == 1)
-		{
-			int32* single_channel = (int32*)rb + (pl.audio.input.format.buffer_frame_count - 1);
-			for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
-			{
-				*sink_front = (f32)(((f64)*single_channel) / 2147483647.0);
-				sink_front++;
-				single_channel--;
-			}
-		}
+		//Adding the new frames to the sink_buffer from the fifo buffer
+		WIN32_SPECIFIC(pl)->transfer_to_sink_buffer(pl);
 	}
 	
 }
-void PL_push_audio_render(PL& pl)
+void PL_cleanup_audio_capture(PL& pl)
 {
-	//TODO: push out audio buffer to output device
+	free(WIN32_SPECIFIC(pl)->input_fifo_buffer);
+	free(pl.audio.input.sink_buffer);
+	WIN32_SPECIFIC(pl)->input_capture_client->Release();
 }
+//-------------------------------</Audio Capture stuff>----------------------------------
 
 //-------------------------------</Win32 Audio stuff>------------------------------------------
 
