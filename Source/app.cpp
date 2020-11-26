@@ -1,7 +1,6 @@
 #include "pl.h"
-#include <windows.h>
 #include <math.h>
-#include <stdio.h>
+
 
 void PL_initialize(PL& pl)
 {
@@ -15,9 +14,10 @@ void PL_initialize(PL& pl)
 
 void PL_poll(PL& pl)
 {
-	PL_poll_audio_capture(pl);
 	PL_poll_window(pl);
 	PL_poll_timing(pl);
+	PL_poll_input(pl);
+	PL_poll_audio_capture(pl);
 }
 
 void PL_push(PL& pl)
@@ -54,6 +54,8 @@ inline void draw_rectangle_from_point(uint32 from_x, uint32 from_y, uint32 to_x,
 	}
 }
 
+
+
 inline void draw_verticle_line_from_point( uint32 x,uint32 y, int32 height, PL pl, uint8 r, uint8 g, uint8 b)
 {
 	uint32 color = (uint32)r << 16 | (uint32)g << 8 | (uint32)b << 0;
@@ -76,23 +78,13 @@ inline void draw_verticle_line_from_point( uint32 x,uint32 y, int32 height, PL p
 	}
 }
 
-void PL_update(PL& pl)
+
+
+void update(PL& pl)
 {
-	/*if (pl.audio.input.no_of_new_frames == 0)
-	{
-		return;
-	}*/
-	memset(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
-	
 
-	//static f64 timing_refresh = 0;
-	//timing_refresh = pl.time.fcurrent_seconds - timing_refresh;
-	//char buffer[256];
-	//sprintf_s(buffer, "Time per sample: %.*fms \n", 2, timing_refresh * 1000);
-	//OutputDebugStringA(buffer);
-	//timing_refresh = pl.time.fcurrent_seconds;
+	set_memory(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
 	
-
 	uint8 red, green, blue;
 	f32 volume = 0;
 	for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
@@ -102,12 +94,17 @@ void PL_update(PL& pl)
 	volume = volume / (f32)pl.audio.input.no_of_new_frames;
 	volume = sqrtf(volume);
 	blue = ((volume * (f32)255) <= (f32)255) ? (uint8)((f32)volume * 255.f) : 255;
-	//char msg[512];
-	//wsprintfA(msg, "Mouse: pos_x:%i , pos_y:%i \n", pl.input.mouse.position_x, pl.input.mouse.position_y);
-	//wsprintfA(msg, "New_frames: %i \n", pl.audio.input.no_of_new_frames);
+	debug_print("Mouse: pos_x:%i , pos_y:%i \n", pl.input.mouse.position_x, pl.input.mouse.position_y);
 
-	//OutputDebugStringA(msg);
-	////draw_rectangle_from_point(pl.window_bltbitmap.width/2, pl.window_bltbitmap.height/2, pl.input.mouse.position_x,pl.input.mouse.position_y, pl, 255, 0, 0);
+	if (pl.input.keys[PL_KEY::ALT].down && pl.input.mouse.is_in_window)
+	{
+		draw_rectangle_from_point(pl.window.window_bitmap.width/2, pl.window.window_bitmap.height/2, pl.input.mouse.position_x,pl.input.mouse.position_y, pl, 255, 0, 0);
+	}
+
+	if (pl.input.mouse.is_in_window)
+	{
+		draw_rectangle_from_point(pl.input.mouse.position_x, pl.input.mouse.position_y, pl.input.mouse.position_x + 1, pl.input.mouse.position_y + 1, pl,78, 99, 200);
+	}
 
 	for (uint32 i = 0; i < pl.window.window_bitmap.width; i++)
 	{
@@ -144,10 +141,10 @@ void PL_update(PL& pl)
 void PL_entry_point(PL& pl)
 {
 	pl.audio.input.only_update_every_new_buffer = FALSE;
-	pl.audio.input.format.no_channels = 2;
+	pl.audio.input.format.no_channels = 1;
 	pl.audio.input.format.samples_per_second = 44100;
 	pl.audio.input.format.no_bits_per_sample = 16;
-	pl.audio.input.format.buffer_duration_seconds = 1.f / 30.f;
+	pl.audio.input.format.buffer_duration_seconds = 1.f / 1.f;
 	pl.audio.input.is_loopback = TRUE;
 	pl.window.height = 720;
 	pl.window.width = 1280;
@@ -155,7 +152,11 @@ void PL_entry_point(PL& pl)
 	while (pl.running)
 	{
 		PL_poll(pl);
-		PL_update(pl);
+		if (pl.input.keys[PL_KEY::F4].down && pl.input.keys[PL_KEY::ALT].down)
+		{
+			pl.running = FALSE;
+		}
+		update(pl);
 		PL_push(pl);
 	}
 	PL_cleanup(pl);

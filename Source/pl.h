@@ -70,9 +70,9 @@ void PL_initialize_timing(PL& pl);
 //-----------------------------------------------------<Input>------------------------------------------------------
 struct PL_Digital_Button
 {
-	b32 is_down;
-	b32 was_released;
-	b32 was_pressed;
+	b32 down;		//is currently down
+	b32 released;	//was just released 
+	b32 pressed;	//was just pressed down
 };
 struct PL_Input_Mouse
 {
@@ -82,8 +82,78 @@ struct PL_Input_Mouse
 	PL_Digital_Button left;
 	PL_Digital_Button right;
 };
+enum PL_KEY
+{
+	SPACE = 32,
+	NUM_0 = 48,
+	NUM_1,
+	NUM_2,
+	NUM_3,
+	NUM_4,
+	NUM_5,
+	NUM_6,
+	NUM_7,
+	NUM_8,
+	NUM_9,
+	A = 65,
+	B,
+	C,
+	D,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	S,
+	T,
+	U,
+	V,
+	W,
+	X,
+	Y,
+	Z,
+
+	F1 = 112,
+	F2,
+	F3,
+	F4,
+	F5,
+	F6,
+	F7,
+	F8,
+	F9,
+	F10,
+	F11,
+	F12,
+
+	ESCAPE = 27,
+
+	SHIFT = 16,
+	CTRL = 17,
+	ALT = 18,
+	LEFT_SHIFT = 160,
+	RIGHT_SHIFT,
+	LEFT_CTRL ,
+	RIGHT_CTRL ,
+	LEFT_ALT  ,
+	RIGHT_ALT ,
+};
+
 struct PL_Input
 {
+	union
+	{
+		PL_Digital_Button keys[PL_INPUT_KEYBOARD_MAX_KEYS];
+	};
 	PL_Input_Mouse mouse;
 };
 void PL_poll_input(PL& pl);
@@ -175,5 +245,11 @@ struct PL
 
 void PL_entry_point(PL& pl);
 
+//TODO: put into PL_utils
+//-----------temp utils--
+#include <cstdarg>
+void debug_print(const char* format, ...);
+void set_memory(void* source, int32 value_to_set,int32 no_bytes);
+//-----------------
 #define PL_CONFIG_UNDEF
 #include"pl_config.h"

@@ -29,14 +29,13 @@ struct Win32Specific
 #define WIN32_SPECIFIC(x) ((Win32Specific*)x.platform_specific)
 
 //-------------------------------<win32 window stuff>----------------------------------------
-//Also handles Keyboard and Mouse input polling. 
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);//actual win32 message callback
 void static CALLBACK wnd_message_fiber_proc(PL& pl);//for switching to fiber that handles processing message callbacks
 void PL_initialize_window(PL& pl)
 {
 
 	int window_width, window_height;
-	if (pl.window.height == 0)	//uninitialized
+	if (pl.window.height == 0)	//if uninitialized
 	{
 		window_height = CW_USEDEFAULT;
 	}
@@ -187,28 +186,6 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 			KillTimer(hwnd, 1);
 
 		}break;
-		case WM_MOUSEMOVE:
-		{
-			POINT pos;
-			pos.x = GET_X_LPARAM(lParam);
-			pos.y = GET_Y_LPARAM(lParam);
-			pl->input.mouse.position_x = pos.x;
-			pl->input.mouse.position_y = pl->window.height - pos.y;	//to be consistant with bottom left being (0,0)
-			
-
-		}break;
-		case WM_KEYUP:
-		{
-			uint32 VKCode = wParam;
-
-			//NOTE: To exit the application using alt+F4
-			b8 AltKeyWasDown = (lParam & (1 << 29)) != 0;
-
-			if (VKCode == VK_F4 && AltKeyWasDown)
-			{
-				pl->running = false;
-			}
-		}break;
 
 		case WM_DESTROY:
 		{
@@ -278,7 +255,7 @@ void PL_push_window(PL& pl)
 	//NOTE: This is assuming the window is drawing a bitmap 
 	StretchDIBits(
 		WIN32_SPECIFIC(pl)->main_monitor_DC,
-		0, 0, pl.window.window_bitmap.width, pl.window.window_bitmap.height,
+		0,0, pl.window.window_bitmap.width, pl.window.window_bitmap.height,
 		0, 0, pl.window.window_bitmap.width, pl.window.window_bitmap.height,
 		pl.window.window_bitmap.buffer,
 		&WIN32_SPECIFIC(pl)->window_bmi_header,
@@ -341,9 +318,32 @@ void PL_initialize_input(PL& pl)
 
 }
 
+inline void update_digital_button(PL_Digital_Button& bt, b32 down)
+{
+	bt.pressed = !bt.down && down;
+	bt.released = bt.down && !down;
+	bt.down = down;
+}
+
 void PL_poll_input(PL& pl)
 {
-
+	//Getting keyboard input
+	b32 result;
+	unsigned char kb[256];
+	result = GetKeyboardState(kb);
+	ASSERT(result);
+	for(int i = 0; i < 256; i++)
+	{
+		update_digital_button(pl.input.keys[i], kb[i] >> 7);
+	}
+	
+	//Getting mouse input
+	POINT mouse_pos;
+	GetCursorPos(&mouse_pos);
+	ScreenToClient(WIN32_SPECIFIC(pl)->wnd_handle, &mouse_pos);
+	pl.input.mouse.position_x = mouse_pos.x;
+	pl.input.mouse.position_y = pl.window.height-mouse_pos.y;
+	pl.input.mouse.is_in_window = (pl.input.mouse.position_x >= 0 && pl.input.mouse.position_x < pl.window.width) && (pl.input.mouse.position_y >= 0 && pl.input.mouse.position_y < pl.window.height);
 }
 
 //-------------------------------</Input stuff>-----------------------------------------------
@@ -395,10 +395,11 @@ void PL_initialize_audio_render(PL& pl)
 	of.nAvgBytesPerSec = pl.audio.output.format.samples_per_second * of.nBlockAlign;
 	of.wBitsPerSample = pl.audio.output.format.no_bits_per_sample;
 
+
+
 	CoTaskMemFree(q_of);
 	pEnumerator->Release();
 	output_endpoint->Release();
-	output_audio_client->Release();
 }
 
 void PL_push_audio_render(PL& pl)
@@ -407,7 +408,8 @@ void PL_push_audio_render(PL& pl)
 }
 void PL_cleanup_audio_render(PL& pl)
 {
-
+	WIN32_SPECIFIC(pl)->output->Stop();
+	WIN32_SPECIFIC(pl)->output->Release();
 }
 //-------------------------------</Audio Render stuff>--------------------------------------
 
@@ -764,3 +766,20 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 }
 //--------------------------------</Win32 ENTRY POINT>------------------------------------------
 #undef WIN32_SPECIFIC
+
+//--------temp utils--------------------
+void debug_print(const char* format, ...)
+{
+	static char buffer[1024];
+	va_list arg_list;
+	va_start(arg_list, format);
+	vsprintf_s(buffer, sizeof(buffer), format, arg_list);
+	va_end(arg_list);
+	OutputDebugStringA(buffer);
+}
+
+void set_memory(void* buffer, int32 value,int32 size)
+{
+	memset(buffer, value, size);
+}
+//--------/temp utils--------------------
