@@ -6,31 +6,32 @@ void PL_initialize(PL& pl)
 {
 	pl.running = TRUE;
 	pl.initialized = FALSE;
-	PL_initialize_timing(pl);
-	PL_initialize_audio_capture(pl);
-	PL_initialize_window(pl);
+	PL_initialize_timing(pl.time);
+	PL_initialize_audio_capture(pl.audio.input);
+	PL_initialize_window(pl.window);
 	pl.initialized = TRUE;
 }
 
 void PL_poll(PL& pl)
 {
-	PL_poll_window(pl);
-	PL_poll_timing(pl);
-	PL_poll_input(pl);
-	PL_poll_audio_capture(pl);
+	PL_poll_window(pl.window);
+	PL_poll_timing(pl.time);
+	PL_poll_input_mouse(pl.input.mouse, pl.window);
+	PL_poll_input_keyboard(pl.input.kb);
+	PL_poll_audio_capture(pl.audio.input);
 }
 
 void PL_push(PL& pl)
 {
 	//PL_push_audio_render(pl);
-	PL_push_window(pl);
+	PL_push_window(pl.window, &pl.time);
 }
 
 void PL_cleanup(PL& pl)
 {
-	PL_cleanup_audio_capture(pl);
+	PL_cleanup_audio_capture(pl.audio.input);
 	//PL_cleanup_audio_render(pl);
-	PL_cleanup_window(pl);
+	PL_cleanup_window(pl.window);
 }
 
 inline void draw_rectangle_from_point(uint32 from_x, uint32 from_y, uint32 to_x, uint32 to_y, PL pl, uint8 r, uint8 g, uint8 b)
