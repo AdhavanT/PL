@@ -356,18 +356,17 @@ void PL_poll_input_mouse(PL_Input_Mouse& mouse, PL_Window& main_window)
 	GetCursorPos(&mouse_pos);
 	ScreenToClient(pl_specific->wnd_handle, &mouse_pos);
 	mouse.position_x = mouse_pos.x;
-	mouse.position_y = main_window.height-mouse_pos.y;
+	mouse.position_y = main_window.height - mouse_pos.y;
 	mouse.is_in_window = (mouse.position_x >= 0 && mouse.position_x < (int32)main_window.width) && (mouse.position_y >= 0 && mouse.position_y < (int32)main_window.height);
 	SHORT lb = GetKeyState(VK_LBUTTON);
 	SHORT rb = GetKeyState(VK_RBUTTON);
 	update_digital_button(mouse.left, lb >> 7);
-	update_digital_button(mouse.left, rb >> 7);
+	update_digital_button(mouse.right, rb >> 7);
 }
 
 void PL_initialize_input_keyboard(PL_Input_Keyboard& keyboard)
 {
 	//Initializing keyboard input
-
 }
 
 void PL_poll_input_keyboard(PL_Input_Keyboard& keyboard)
@@ -377,7 +376,7 @@ void PL_poll_input_keyboard(PL_Input_Keyboard& keyboard)
 	unsigned char kb[256];
 	result = GetKeyboardState(kb);
 	ASSERT(result);
-	for (int i = 0; i < 256; i++)
+	for (int i = 0; i < PL_INPUT_KEYBOARD_MAX_KEYS; i++)
 	{
 		update_digital_button(keyboard.keys[i], kb[i] >> 7);
 	}
@@ -386,7 +385,6 @@ void PL_poll_input_keyboard(PL_Input_Keyboard& keyboard)
 void PL_initialize_input_gamepad(PL_Input_Gamepad& gamepad)
 {
 	//Initializing gamepad input
-
 }
 
 void PL_poll_input_gamepad(PL_Input_Gamepad& gamepad)
