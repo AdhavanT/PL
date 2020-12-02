@@ -813,19 +813,4 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 }
 //--------------------------------</Win32 ENTRY POINT>------------------------------------------
 
-//--------temp utils--------------------
-void debug_print(const char* format, ...)
-{
-	static char buffer[1024];
-	va_list arg_list;
-	va_start(arg_list, format);
-	vsprintf_s(buffer, sizeof(buffer), format, arg_list);
-	va_end(arg_list);
-	OutputDebugStringA(buffer);
-}
 
-void set_memory(void* buffer, int32 value,int32 size)
-{
-	memset(buffer, value, size);
-}
-//--------/temp utils--------------------

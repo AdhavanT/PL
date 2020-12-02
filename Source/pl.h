@@ -280,11 +280,5 @@ struct PL
 
 void PL_entry_point(PL& pl);
 
-//TODO: put into PL_utils
-//-----------temp utils--
-#include <cstdarg>
-void debug_print(const char* format, ...);
-void set_memory(void* source, int32 value_to_set,int32 no_bytes);
-//-----------------
 #define PL_CONFIG_UNDEF
 #include"pl_config.h"

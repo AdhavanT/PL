@@ -1,4 +1,4 @@
-#include "pl.h"
+#include "pl_utils.h"
 #include <math.h>
 
 
@@ -83,7 +83,7 @@ inline void draw_verticle_line_from_point( uint32 x,uint32 y, int32 height, PL p
 void update(PL& pl)
 {
 
-	set_memory(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
+	buffer_set(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
 	
 	uint8 red, green, blue;
 	f32 volume = 0;
