@@ -214,6 +214,11 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 			PostQuitMessage(0);
 		}break;
 
+		case WM_QUIT:
+		{
+			*pl_specific->pointer_to_pl_running = FALSE;
+		}
+
 		case WM_TIMER:
 		{
 			SwitchToFiber((pl_specific)->main_fiber);
@@ -257,21 +262,13 @@ void PL_poll_window(PL_Window &window)
 
 }
  
-//this updates the window. include PL_Timing for the window title to display frametimes, pass null for normal window title.
-void PL_push_window(PL_Window& window, PL_Timing* time)
+//this updates the window. include PL_Timing for the window title to display frametimes, pass false for previous window title.
+void PL_push_window(PL_Window& window, b32 refresh_window_title)
 {
 	//Refreshing the FPS counter in the window title bar. Comment out to turn off. 
-	if (time)
+	if (refresh_window_title)
 	{
-		static f64 timing_refresh = 0;
-		if (time->fcurrent_seconds - timing_refresh > 0.1)//refreshing at a tenth(0.1) of a second.
-		{
-			int32 frame_rate = (int32)(time->cycles_per_second / time->delta_cycles);
-			char buffer[256];
-			sprintf_s(buffer, "Time per frame: %.*fms , %dFPS\n",2, (f64)time->fdelta_seconds * 1000, frame_rate);
-			SetWindowTextA(pl_specific->wnd_handle, buffer);
-			timing_refresh = time->fcurrent_seconds;
-		}
+		SetWindowTextA(pl_specific->wnd_handle, window.title);
 	}
 
 #if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP

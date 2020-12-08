@@ -1,6 +1,6 @@
+#include "pl.h"
 #include "pl_utils.h"
-#include <math.h>
-
+#include "PL_math.h"
 
 void PL_initialize(PL& pl)
 {
@@ -24,7 +24,18 @@ void PL_poll(PL& pl)
 void PL_push(PL& pl)
 {
 	//PL_push_audio_render(pl);
-	PL_push_window(pl.window, &pl.time);
+
+	//Refreshing the FPS counter in the window title bar. Comment out to turn off. 
+	static f64 timing_refresh = 0;
+	static char buffer[256];
+	if (pl.time.fcurrent_seconds - timing_refresh > 0.1)//refreshing at a tenth(0.1) of a second.
+	{
+		int32 frame_rate = (int32)(pl.time.cycles_per_second / pl.time.delta_cycles);
+		format_print(buffer, 256,"Time per frame: %.*fms , %dFPS\n", 2, (f64)pl.time.fdelta_seconds * 1000, frame_rate);
+		pl.window.title = buffer;
+		timing_refresh = pl.time.fcurrent_seconds;
+	}
+	PL_push_window(pl.window, TRUE);
 }
 
 void PL_cleanup(PL& pl)
@@ -95,7 +106,7 @@ void update(PL& pl)
 	volume = sqrtf(volume);
 	blue = ((volume * (f32)255) <= (f32)255) ? (uint8)((f32)volume * 255.f) : 255;
 
-	debug_print("Mouse: pos_x:%i , pos_y:%i \n", pl.input.mouse.position_x, pl.input.mouse.position_y);
+	//debug_print("Mouse: pos_x:%i , pos_y:%i \n", pl.input.mouse.position_x, pl.input.mouse.position_y);
 	//debug_print("Window: pos_x:%i , pos_y:%i \n", pl.window.position_x, pl.window.position_y);
 
 
@@ -138,6 +149,7 @@ void update(PL& pl)
 	//f32 added_pos = (f32)(pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames) / (f32)pl.audio.input.format.buffer_frame_count;
 	//int32 added_pos_i = (int32)(added_pos * (f32)(pl.window_bltbitmap.width));
 	//draw_verticle_line_from_point(added_pos_i, (pl.window_bltbitmap.height / 2), (pl.window_bltbitmap.height - 10) / 2.0f, pl, 255, 0, 0);
+	
 }
 
 void PL_entry_point(PL& pl)
