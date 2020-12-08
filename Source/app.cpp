@@ -103,7 +103,7 @@ void update(PL& pl)
 		volume += pl.audio.input.sink_buffer[i] * pl.audio.input.sink_buffer[i];
 	}
 	volume = volume / (f32)pl.audio.input.no_of_new_frames;
-	volume = sqrtf(volume);
+	volume = sqroot(volume);
 	blue = ((volume * (f32)255) <= (f32)255) ? (uint8)((f32)volume * 255.f) : 255;
 
 	//debug_print("Mouse: pos_x:%i , pos_y:%i \n", pl.input.mouse.position_x, pl.input.mouse.position_y);

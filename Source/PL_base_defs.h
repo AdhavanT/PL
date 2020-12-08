@@ -12,6 +12,16 @@
 #define ASSERT(X)
 #endif 
 
+#ifdef PL_COMPILER_MSVC
+	#ifdef _M_X64
+		#define PL_X64
+	#else
+		#ifdef _M_IX86
+		#define PL_X86
+	#endif
+	#endif
+#endif
+
 #ifdef PL_COMPILER_MSVC 
 #define FORCEDINLINE __forceinline
 #else

@@ -1,6 +1,6 @@
 #pragma once
 #include "PL_base_defs.h"
-#include <immintrin.h>
+#include <intrin.h>
 
 //-----------------------------------------------
 #define MAX_FLOAT          3.402823466e+38F        // max value
@@ -632,51 +632,75 @@ FORCEDINLINE f32 rand_bi(RNG_Stream* stream)
 //---------------------------------------------------------------------------
 
 //---------------------------<ATOMICS>---------------------------------------
-
-#ifdef PL_WINDOWS
-#include <Windows.h>
-#endif
+#ifdef PL_X64
+#pragma intrinsic(_InterlockedExchangeAdd64)
+//NOTE: Doesn't work on x86 
 //performs atomic add and returns result(for int64 value)
 FORCEDINLINE int64 interlocked_add_i64(volatile int64* data, int64 value)
 {
-	return InterlockedAdd64(data, value);
+	int64 Old = _InterlockedExchangeAdd64(data, value);
+	return Old + value;
 }
+#endif
+
+#pragma intrinsic(_InterlockedExchangeAdd)
 //performs atomic add and returns result(for int32 value)
 FORCEDINLINE int32 interlocked_add_i32(volatile int32* data, int32 value)
 {
-	return InterlockedAdd((volatile long*)data, value);
+	int32 Old = _InterlockedExchangeAdd((long*)data, value);
+	return Old + value;
 }
 
+#ifdef PL_X64
+#pragma intrinsic(_InterlockedIncrement64)
+//NOTE: Doesn't work on x86 
 //returns resulting incremented value after performing locked increment(for int64 value)
 FORCEDINLINE int64 interlocked_increment_i64(volatile int64* data)
 {
-	return InterlockedIncrement64(data);
+	return _InterlockedIncrement64(data);
 }
+#endif
+
+#pragma intrinsic(_InterlockedIncrement)
 //returns resulting decremented value after performing locked decrement(for int32 value)
 FORCEDINLINE int64 interlocked_increment_i32(volatile int32* data)
 {
-	return InterlockedIncrement((volatile long*)data);
+	return _InterlockedIncrement((volatile long*)data);
 }
 
+#ifdef PL_X64
+#pragma intrinsic(_InterlockedDecrement64)
+//NOTE: Doesn't work on x86 
 //returns resulting decremented value after performing locked decrement(for int64 value)
 FORCEDINLINE int64 interlocked_decrement_i64(volatile int64* data)
 {
-	return InterlockedDecrement64(data);
+	return _InterlockedDecrement64(data);
 }
+#endif
+
+#pragma intrinsic(_InterlockedDecrement)
 //returns resulting decremented value after performing locked decrement(for int32 value)
 FORCEDINLINE int64 interlocked_decrement_i32(volatile int32* data)
 {
-	return InterlockedDecrement((volatile long*)data);
+	return _InterlockedDecrement((volatile long*)data);
 }
+
+#ifdef PL_X64
+
+#pragma intrinsic(_InterlockedExchange64)
+//NOTE: Doesn't work on x86 
 //returns previous value after exchanging with new value
 FORCEDINLINE int64 interlocked_exchange_i64(volatile int64* data, int64 value)
 {
-	return InterlockedExchange64((volatile long long*)data, value);
+	return _InterlockedExchange64((volatile long long*)data, value);
 }
+#endif
+
+#pragma intrinsic(_InterlockedExchange)
 //returns previous value after exchanging with new value
 FORCEDINLINE int32 interlocked_exchange_i32(volatile int32* data, int32 value)
 {
-	return InterlockedExchange((volatile long*)data, value);
+	return _InterlockedExchange((volatile long*)data, value);
 }
 
 //---------------------------</ATOMICS>--------------------------------------

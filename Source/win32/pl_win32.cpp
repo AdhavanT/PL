@@ -102,7 +102,7 @@ void PL_initialize_window(PL_Window& window)
 	//ShowWindow(pl_specific->wnd_handle, SW_SHOW);
 
 	//This passes a pointer to pl to the wnd_proc message callback. (It's retrieved by GetWindowLongPtrA(hwnd, GWLP_USERDATA))
-	SetWindowLongPtrA(pl_specific->wnd_handle, GWL_USERDATA, (LONG_PTR)&window);
+	SetWindowLongPtrA(pl_specific->wnd_handle, GWLP_USERDATA, (LONG_PTR)&window);
 	
 	pl_specific->main_fiber = ConvertThreadToFiber(0);
 	ASSERT(pl_specific->main_fiber);
