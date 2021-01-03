@@ -31,7 +31,7 @@ void PL_push(PL& pl)
 	if (pl.time.fcurrent_seconds - timing_refresh > 0.1)//refreshing at a tenth(0.1) of a second.
 	{
 		int32 frame_rate = (int32)(pl.time.cycles_per_second / pl.time.delta_cycles);
-		format_print(buffer, 256,"Time per frame: %.*fms , %dFPS\n", 2, (f64)pl.time.fdelta_seconds * 1000, frame_rate);
+		pl_format_print(buffer, 256,"Time per frame: %.*fms , %dFPS\n", 2, (f64)pl.time.fdelta_seconds * 1000, frame_rate);
 		pl.window.title = buffer;
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
@@ -94,7 +94,7 @@ inline void draw_verticle_line_from_point( uint32 x,uint32 y, int32 height, PL p
 void update(PL& pl)
 {
 
-	buffer_set(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
+	pl_buffer_set(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
 	
 	uint8 red, green, blue;
 	f32 volume = 0;

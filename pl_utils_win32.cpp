@@ -1,43 +1,33 @@
 #include "pl_utils.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <corecrt_malloc.h>
 #include <cstdio>	//for file io stuff
 
 
-uint32 get_thread_id()
+uint32 pl_get_thread_id()
 {
 	return GetCurrentThreadId();
 }
 
-uint64 get_hardware_entropy()
+uint64 pl_get_hardware_entropy()
 {
 	//TODO: consider using rdrand intrinsic for proper hardware entropy
 	//right now, just gets current time stamp counter and multiplies with thread id (to make "thread safe" I guess)
 	return __rdtsc() * GetCurrentThreadId();
 }
 
-void close_thread(const ThreadHandle* handle)
+void pl_close_thread(const ThreadHandle* handle)
 {
 	CloseHandle(handle->thread_handle);
 }
 
-void close_threads(uint32 no_of_threads, const ThreadHandle* handles)
-{
-	for (uint32 i = 0; i < no_of_threads; i++)
-	{
-		
-		b32 success = CloseHandle(handles[i].thread_handle);
-		ASSERT(success);
-	}
-}
 
-b32 wait_for_thread(const ThreadHandle* handle, uint32 timeout_in_ms)
+b32 pl_wait_for_thread(const ThreadHandle* handle, uint32 timeout_in_ms)
 {
 	return WaitForSingleObject((HANDLE*)handle, timeout_in_ms);
 }
 
-b32 wait_for_all_threads(uint32 no_of_threads, const ThreadHandle* handles, uint32 timeout_in_ms)
+b32 pl_wait_for_all_threads(uint32 no_of_threads, const ThreadHandle* handles, uint32 timeout_in_ms)
 {
 	return WaitForMultipleObjects(no_of_threads, (HANDLE*)handles, TRUE, timeout_in_ms);
 }
@@ -53,44 +43,41 @@ static DWORD WINAPI win32_start_thread(__in LPVOID lpParameter)
 {
 	CreateThreadData* new_thread_data = (CreateThreadData*)lpParameter;
 	new_thread_data->func_to_be_executed(new_thread_data->data);
-	buffer_free(new_thread_data);
+	pl_buffer_free(new_thread_data);
 	return 0;
 }
 
-void buffer_set(void* buffer, int32 value_to_set, int32 no_bytes_to_set)
+static HANDLE process_heap = GetProcessHeap();
+
+void pl_buffer_set(void* buffer, int32 value_to_set, int32 no_bytes_to_set)
 {
-	memset(buffer, value_to_set, no_bytes_to_set);
+	FillMemory(buffer, no_bytes_to_set, value_to_set);
 }
 
-
-void buffer_copy(void* destination, void* from, uint32 length)
+void pl_buffer_copy(void* destination, void* from, uint32 length)
 {
 	CopyMemory(destination, from, length);
 }
 
-void* buffer_malloc(size_t size)
+void* pl_buffer_alloc(size_t size)
 {
-	return malloc(size);
+	return HeapAlloc(process_heap, HEAP_ZERO_MEMORY, size);
 }
 
-void* buffer_calloc(size_t size)
+//NOTE: implementation needs to perform realloc() and free previous buffer. HeapReAlloc() does both.  
+void* pl_buffer_resize(void* block, size_t new_size)
 {
-	return calloc(1, size);
+	return HeapReAlloc(process_heap, HEAP_ZERO_MEMORY, block, new_size);
 }
 
-void* buffer_realloc(void* block, size_t new_size)
+void pl_buffer_free(void* buffer)
 {
-	return realloc(block, new_size);
+	HeapFree(process_heap,0,buffer);
 }
 
-void buffer_free(void* buffer)
+ThreadHandle pl_create_thread(ThreadProc proc, void* data)
 {
-	free(buffer);
-}
-
-ThreadHandle create_thread(ThreadProc proc, void* data)
-{
-	CreateThreadData* new_thread_data = (CreateThreadData*)buffer_malloc(sizeof(CreateThreadData));
+	CreateThreadData* new_thread_data = (CreateThreadData*)pl_buffer_alloc(sizeof(CreateThreadData));
 	new_thread_data->func_to_be_executed = proc;
 	new_thread_data->data = data;
 
@@ -101,12 +88,12 @@ ThreadHandle create_thread(ThreadProc proc, void* data)
 	return handle;
 }
 
-void sleep_thread(uint32 timeout_in_ms)
+void pl_sleep_thread(uint32 timeout_in_ms)
 {
 	Sleep((DWORD)timeout_in_ms);
 }
 
-void load_file_into(void* block_to_store_into, uint32 bytes_to_load,char* path)
+void pl_load_file_into(void* block_to_store_into, uint32 bytes_to_load,char* path)
 {
 	void* file;
 	errno_t error = fopen_s((FILE**)&file, path, "rb");
@@ -122,13 +109,37 @@ void load_file_into(void* block_to_store_into, uint32 bytes_to_load,char* path)
 	}
 }
 
-b32 create_and_load_into_file(void* block_to_store, uint32 bytes_to_write, char* path)
+b32 pl_create_file(void** file_handle,char* path)
 {
-
-	return b32();
+	*file_handle = CreateFileA(path, GENERIC_WRITE, 0, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+	if (INVALID_HANDLE_VALUE == file_handle)
+	{
+		return FALSE;
+	}
+	else if (GetLastError() == ERROR_FILE_EXISTS)
+	{
+		return FALSE;
+	}
+	else
+	{
+		return TRUE;
+	}
 }
 
-uint32 get_file_size(char* path)
+b32 pl_append_to_file(void* file_handle, void* block_to_store, int32 bytes_to_append)
+{
+	LARGE_INTEGER offset;
+	offset.QuadPart = 0;
+	SetFilePointerEx(file_handle, offset, 0, FILE_END);
+	return WriteFile(file_handle, block_to_store, bytes_to_append, 0, 0);
+}
+
+b32 pl_close_file_handle(void* file_handle)
+{
+	return CloseHandle(file_handle);
+}
+
+uint32 pl_get_file_size(char* path)
 {
 	void* file;
 	errno_t error = fopen_s((FILE**)&file, path, "rb");
@@ -151,14 +162,14 @@ uint32 get_file_size(char* path)
 	return end;
 }
 
-uint64 get_tsc()
+uint64 pl_get_tsc()
 {
 	LARGE_INTEGER tsc;
 	QueryPerformanceCounter(&tsc);
 	return tsc.QuadPart;
 }
 
-void debug_print(const char* format, ...)
+void pl_debug_print(const char* format, ...)
 {
 	static char buffer[1024];
 	va_list arg_list;
@@ -168,7 +179,7 @@ void debug_print(const char* format, ...)
 	OutputDebugStringA(buffer);
 }
 
-void format_print(char* buffer, uint32 buffer_size, const char* format, ...)
+void pl_format_print(char* buffer, uint32 buffer_size, const char* format, ...)
 {
 	va_list arg_list;
 	va_start(arg_list, format);
