@@ -1,11 +1,10 @@
 #include "pl.h"
 #include "pl_config.h"
+#include "pl_utils.h"
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <windowsx.h>
-#include <malloc.h>
-#include <stdio.h>
 
 struct Win32Specific
 {
@@ -26,10 +25,10 @@ struct Win32Specific
 	IAudioCaptureClient* input_capture_client;
 	void (*transfer_to_sink_buffer)(PL_Audio_Input& input);
 	//Audio Render Stuff
-	IAudioClient *output;
+	IAudioClient* output;
 };
 
-static Win32Specific *pl_specific;
+static Win32Specific* pl_specific;
 
 //-------------------------------<win32 window stuff>----------------------------------------
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);//actual win32 message callback
@@ -54,12 +53,12 @@ void PL_initialize_window(PL_Window& window)
 	{
 		window_width = window.width;
 	}
-	
+
 	if (window.title == 0)
 	{
 		window.title = (char*)"Win32 PL test";
 	}
-	
+
 	if (window_width != CW_USEDEFAULT && window_height != CW_USEDEFAULT)
 	{
 		RECT window_rectangle;
@@ -67,7 +66,7 @@ void PL_initialize_window(PL_Window& window)
 		window_rectangle.right = window.width;
 		window_rectangle.top = 0;
 		window_rectangle.bottom = window.height;
-		if (AdjustWindowRect(&window_rectangle, WS_OVERLAPPEDWINDOW, 0)) 
+		if (AdjustWindowRect(&window_rectangle, WS_OVERLAPPEDWINDOW, 0))
 		{
 			window_width = window_rectangle.right - window_rectangle.left;
 			window_height = window_rectangle.bottom - window_rectangle.top;
@@ -103,7 +102,7 @@ void PL_initialize_window(PL_Window& window)
 
 	//This passes a pointer to pl to the wnd_proc message callback. (It's retrieved by GetWindowLongPtrA(hwnd, GWLP_USERDATA))
 	SetWindowLongPtrA(pl_specific->wnd_handle, GWLP_USERDATA, (LONG_PTR)&window);
-	
+
 	pl_specific->main_fiber = ConvertThreadToFiber(0);
 	ASSERT(pl_specific->main_fiber);
 	pl_specific->message_fiber = CreateFiber(0, (PFIBER_START_ROUTINE)wnd_message_fiber_proc, &window);
@@ -127,7 +126,7 @@ void PL_initialize_window(PL_Window& window)
 
 	if ((window.window_bitmap.buffer == 0) && (window.window_bitmap.size != 0))
 	{
-		window.window_bitmap.buffer = malloc(window.window_bitmap.size);
+		window.window_bitmap.buffer = pl_buffer_alloc(window.window_bitmap.size);
 	}
 	ASSERT(window.window_bitmap.buffer);
 
@@ -169,7 +168,7 @@ void CALLBACK wnd_message_fiber_proc(PL_Window& window)
 	//Sets a timer for 1ms that sends a WM_TIMER message to the message queue
 	SetTimer(pl_specific->wnd_handle, 1, 1, 0);
 
-	while (*pl_specific->pointer_to_pl_running)	
+	while (*pl_specific->pointer_to_pl_running)
 	{
 		MSG message;
 		while (PeekMessageA(&message, 0, 0, 0, PM_REMOVE))
@@ -184,7 +183,7 @@ void CALLBACK wnd_message_fiber_proc(PL_Window& window)
 		SwitchToFiber(pl_specific->main_fiber);
 	}
 	SwitchToFiber(pl_specific->main_fiber);
-} 
+}
 
 LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -196,43 +195,43 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 	}
 	switch (uMsg)
 	{
-		case WM_ENTERSIZEMOVE:
-		{
-			window->was_altered = TRUE;	
-			SetTimer(hwnd, 1, 1, 0);
-		}break;
-		case WM_EXITSIZEMOVE:
-		{
-			window->was_altered = FALSE;
-			KillTimer(hwnd, 1);
+	case WM_ENTERSIZEMOVE:
+	{
+		window->was_altered = TRUE;
+		SetTimer(hwnd, 1, 1, 0);
+	}break;
+	case WM_EXITSIZEMOVE:
+	{
+		window->was_altered = FALSE;
+		KillTimer(hwnd, 1);
 
-		}break;
+	}break;
 
-		case WM_DESTROY:
-		{
-			*pl_specific->pointer_to_pl_running = FALSE;
-			PostQuitMessage(0);
-		}break;
+	case WM_DESTROY:
+	{
+		*pl_specific->pointer_to_pl_running = FALSE;
+		PostQuitMessage(0);
+	}break;
 
-		case WM_QUIT:
-		{
-			*pl_specific->pointer_to_pl_running = FALSE;
-		}
+	case WM_QUIT:
+	{
+		*pl_specific->pointer_to_pl_running = FALSE;
+	}
 
-		case WM_TIMER:
-		{
-			SwitchToFiber((pl_specific)->main_fiber);
-		}break;
+	case WM_TIMER:
+	{
+		SwitchToFiber((pl_specific)->main_fiber);
+	}break;
 
-		default:
-		{
-			result = DefWindowProcA(hwnd, uMsg, wParam, lParam);
-		}
+	default:
+	{
+		result = DefWindowProcA(hwnd, uMsg, wParam, lParam);
+	}
 	}
 	return result;
 }
 
-void PL_poll_window(PL_Window &window)
+void PL_poll_window(PL_Window& window)
 {
 	SwitchToFiber(pl_specific->message_fiber);
 
@@ -261,7 +260,7 @@ void PL_poll_window(PL_Window &window)
 	}
 
 }
- 
+
 //this updates the window. include PL_Timing for the window title to display frametimes, pass false for previous window title.
 void PL_push_window(PL_Window& window, b32 refresh_window_title)
 {
@@ -276,7 +275,7 @@ void PL_push_window(PL_Window& window, b32 refresh_window_title)
 	//NOTE: This is assuming the window is drawing a bitmap 
 	StretchDIBits(
 		pl_specific->main_monitor_DC,
-		0,0, window.window_bitmap.width, window.window_bitmap.height,
+		0, 0, window.window_bitmap.width, window.window_bitmap.height,
 		0, 0, window.window_bitmap.width, window.window_bitmap.height,
 		window.window_bitmap.buffer,
 		&pl_specific->window_bmi_header,
@@ -287,7 +286,7 @@ void PL_push_window(PL_Window& window, b32 refresh_window_title)
 void PL_cleanup_window(PL_Window& window)
 {
 #if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
-	free(window.window_bitmap.buffer);
+	pl_buffer_free(window.window_bitmap.buffer);
 #endif
 }
 
@@ -305,7 +304,7 @@ void PL_initialize_timing(PL_Timing& time)
 
 void PL_poll_timing(PL_Timing& time)
 {
-	LARGE_INTEGER new_q; 
+	LARGE_INTEGER new_q;
 	QueryPerformanceCounter(&new_q);
 
 	f64 tmp_cs;
@@ -487,7 +486,7 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 		ASSERT(result == S_OK);
 	}
 
-	
+
 
 	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)&input_audio_client);
 	ASSERT(result == S_OK);
@@ -495,7 +494,7 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 
 	WAVEFORMATEX ipf = {};
 	DWORD input_stream_flags = AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
-	WAVEFORMATEX *q_ipf;
+	WAVEFORMATEX* q_ipf;
 	(input_audio_client)->GetMixFormat(&q_ipf);
 
 	//setting defaults (non-initialized values in format)
@@ -524,9 +523,9 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 	ipf.nAvgBytesPerSec = input.format.samples_per_second * ipf.nBlockAlign;
 	ipf.wBitsPerSample = input.format.no_bits_per_sample;
 
-	
+
 	// REFERENCE_TIME time units per second and per millisecond
-	#define REFTIMES_PER_SEC  10000000
+#define REFTIMES_PER_SEC  10000000
 
 	if (input.format.buffer_duration_seconds == 0 && input.format.buffer_frame_count == 0)
 	{
@@ -546,7 +545,7 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 	ASSERT(result == S_OK);
 
 	input.format.buffer_duration_seconds = (f32)input.format.buffer_frame_count / (f32)input.format.samples_per_second;
-	#undef REFTIMES_PER_SEC
+#undef REFTIMES_PER_SEC
 
 	result = (input_audio_client)->GetService(__uuidof(IAudioCaptureClient), (void**)&pl_specific->input_capture_client);
 	ASSERT(result == S_OK);
@@ -555,10 +554,10 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 	ASSERT(result == S_OK);
 
 	uint8 bytes_per_frame = input.format.no_channels * (input.format.no_bits_per_sample / 8);
-	
-	pl_specific->input_fifo_buffer = calloc(1, (input.format.buffer_frame_count * bytes_per_frame));
 
-	input.sink_buffer = (f32*)calloc(1,input.format.buffer_frame_count * sizeof(f32) * input.format.no_channels);
+	pl_specific->input_fifo_buffer = pl_buffer_alloc((input.format.buffer_frame_count * bytes_per_frame));
+
+	input.sink_buffer = (f32*)pl_buffer_alloc(input.format.buffer_frame_count * sizeof(f32) * input.format.no_channels);
 
 	CoTaskMemFree(q_ipf);
 	pEnumerator->Release();
@@ -569,7 +568,7 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 	{
 		pl_specific->transfer_to_sink_buffer = transfer_capture_16bit_2channel;
 	}
-	else if(input.format.no_bits_per_sample == 16 && input.format.no_channels == 1)
+	else if (input.format.no_bits_per_sample == 16 && input.format.no_channels == 1)
 	{
 		pl_specific->transfer_to_sink_buffer = transfer_capture_16bit_1channel;
 	}
@@ -686,7 +685,7 @@ void PL_poll_audio_capture(PL_Audio_Input& input)
 	uint32 no_frames_polled = 0;
 	uint32 no_frames_in_packet;
 	b32 packet_is_silence = FALSE;
-	
+
 	while (packet_length != 0)
 	{
 		HRESULT result = pl_specific->input_capture_client->GetBuffer(&input_buffer, &no_frames_in_packet, &flags, NULL, NULL);
@@ -727,16 +726,16 @@ void PL_poll_audio_capture(PL_Audio_Input& input)
 			int32 bytes_to_new_front = (input.format.buffer_frame_count - no_frames_in_packet) * bytes_per_frame;
 			memmove(rb, (uint8*)rb + (bytes_per_frame * no_frames_in_packet), bytes_to_new_front);
 			//setting packets at end to 0
-			memset((uint8*)rb + bytes_to_new_front, 0, no_frames_in_packet * bytes_per_frame);
+			pl_buffer_set((uint8*)rb + bytes_to_new_front, 0, no_frames_in_packet * bytes_per_frame);
 			no_frames_polled += no_frames_in_packet;
 		}
 		else
-		{	
+		{
 			//shifting left
 			int32 bytes_to_new_front = (input.format.buffer_frame_count - no_frames_in_packet) * bytes_per_frame;
 			memmove(rb, (uint8*)rb + (bytes_per_frame * no_frames_in_packet), bytes_to_new_front);
 			//copying packet to end of fifo buffer
-			memcpy((uint8*)rb + bytes_to_new_front, input_buffer, no_frames_in_packet * bytes_per_frame);
+			pl_buffer_copy((uint8*)rb + bytes_to_new_front, input_buffer, no_frames_in_packet * bytes_per_frame);
 			no_frames_polled += no_frames_in_packet;
 		}
 		//copy to input_buffer to cyclic buffer 
@@ -764,7 +763,7 @@ void PL_poll_audio_capture(PL_Audio_Input& input)
 			return;
 		}
 	}
-	
+
 
 	//Adding polled audio frames into floating-point sink_buffer
 	if (input.no_of_new_frames != 0)	//adding the new frames to the sink_buffer
@@ -772,12 +771,12 @@ void PL_poll_audio_capture(PL_Audio_Input& input)
 		//Adding the new frames to the sink_buffer from the fifo buffer
 		pl_specific->transfer_to_sink_buffer(input);
 	}
-	
+
 }
 void PL_cleanup_audio_capture(PL_Audio_Input& input)
 {
-	free(pl_specific->input_fifo_buffer);
-	free(input.sink_buffer);
+	pl_buffer_free(pl_specific->input_fifo_buffer);
+	pl_buffer_free(input.sink_buffer);
 	pl_specific->input_capture_client->Release();
 }
 //-------------------------------</Audio Capture stuff>----------------------------------
@@ -791,13 +790,13 @@ void PL_cleanup_audio_capture(PL_Audio_Input& input)
 //A platform's PL implementation has the job of creating a PL object and a platform_specific object in the main() 
 // and calling PL_entry_point to let the application handle how the initialization and game loop runs. 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
-					_In_opt_ HINSTANCE hPrevInstance,
-					_In_ LPWSTR    lpCmdLine,
-					_In_ int       nCmdShow)
+	_In_opt_ HINSTANCE hPrevInstance,
+	_In_ LPWSTR    lpCmdLine,
+	_In_ int       nCmdShow)
 {
 	Win32Specific pl_win32 = {};
 	pl_win32.hInstance = hInstance;
-	
+
 	PL pl = {};
 	pl_specific = &pl_win32;
 	pl_specific->pointer_to_pl_running = &pl.running;
