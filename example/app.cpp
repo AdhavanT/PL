@@ -2,7 +2,7 @@
 #include "pl_utils.h"
 #include "PL_math.h"
 
-void PL_initialize(PL& pl)
+void initialize(PL& pl)
 {
 	pl.running = TRUE;
 	pl.initialized = FALSE;
@@ -12,7 +12,7 @@ void PL_initialize(PL& pl)
 	pl.initialized = TRUE;
 }
 
-void PL_poll(PL& pl)
+void poll(PL& pl)
 {
 	PL_poll_window(pl.window);
 	PL_poll_timing(pl.time);
@@ -21,7 +21,7 @@ void PL_poll(PL& pl)
 	PL_poll_audio_capture(pl.audio.input);
 }
 
-void PL_push(PL& pl)
+void push(PL& pl)
 {
 	//PL_push_audio_render(pl);
 
@@ -38,7 +38,7 @@ void PL_push(PL& pl)
 	PL_push_window(pl.window, TRUE);
 }
 
-void PL_cleanup(PL& pl)
+void cleanup(PL& pl)
 {
 	PL_cleanup_audio_capture(pl.audio.input);
 	//PL_cleanup_audio_render(pl);
@@ -162,16 +162,16 @@ void PL_entry_point(PL& pl)
 	pl.audio.input.is_loopback = TRUE;
 	pl.window.height = 720;
 	pl.window.width = 1280;
-	PL_initialize(pl);
+	initialize(pl);
 	while (pl.running)
 	{
-		PL_poll(pl);
+		poll(pl);
 		if (pl.input.keys[PL_KEY::F4].down && pl.input.keys[PL_KEY::ALT].down)
 		{
 			pl.running = FALSE;
 		}
 		update(pl);
-		PL_push(pl);
+		push(pl);
 	}
-	PL_cleanup(pl);
+	cleanup(pl);
 }

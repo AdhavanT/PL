@@ -1,8 +1,6 @@
 #include "pl_utils.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <cstdio>	//for file io stuff
-
 
 uint32 pl_get_thread_id()
 {
@@ -93,20 +91,29 @@ void pl_sleep_thread(uint32 timeout_in_ms)
 	Sleep((DWORD)timeout_in_ms);
 }
 
-void pl_load_file_into(void* block_to_store_into, uint32 bytes_to_load,char* path)
+
+b32 pl_load_file_into(void* handle,void* block_to_store_into, uint32 file_size)
 {
-	void* file;
-	errno_t error = fopen_s((FILE**)&file, path, "rb");
-	if (error != 0)
+	DWORD read_bytes;
+	b32 success;
+	success = ReadFile(handle, block_to_store_into, file_size, &read_bytes, 0);
+	if (success == 0 || read_bytes != file_size)
 	{
-		ASSERT(FALSE);	//cant read file
+		return FALSE;
 	}
-	fread(block_to_store_into, bytes_to_load, 1, (FILE*)file);
-	b32 result = fclose((FILE*)file);
-	if (result != 0)
-	{
-		ASSERT(FALSE);	//cant close file!
-	}
+	return TRUE;
+	//void* file;
+	//errno_t error = fopen_s((FILE**)&file, path, "rb");
+	//if (error != 0)
+	//{
+	//	ASSERT(FALSE);	//cant read file
+	//}
+	//fread(block_to_store_into, bytes_to_load, 1, (FILE*)file);
+	//b32 result = fclose((FILE*)file);
+	//if (result != 0)
+	//{
+	//	ASSERT(FALSE);	//cant close file!
+	//}
 }
 
 b32 pl_create_file(void** file_handle,char* path)
@@ -134,32 +141,46 @@ b32 pl_append_to_file(void* file_handle, void* block_to_store, int32 bytes_to_ap
 	return WriteFile(file_handle, block_to_store, bytes_to_append, 0, 0);
 }
 
+//returns false if file already exists.
+b32 pl_get_file_handle(char* path, void** handle)
+{
+	*handle = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+	if (*handle == INVALID_HANDLE_VALUE)
+	{
+		return FALSE;
+	}
+	return TRUE;
+}
+
 b32 pl_close_file_handle(void* file_handle)
 {
 	return CloseHandle(file_handle);
 }
 
-uint32 pl_get_file_size(char* path)
+uint64 pl_get_file_size(void* handle)
 {
-	void* file;
-	errno_t error = fopen_s((FILE**)&file, path, "rb");
-	if (error != 0)
-	{
-		ASSERT(FALSE);	//cant open file!
-	}
-	uint32 current_pos, end;
-	current_pos = ftell((FILE*)file);
-	fseek((FILE*)file, 0, SEEK_END);
-	end = ftell((FILE*)file);
-	fseek((FILE*)file, current_pos, SEEK_SET);
+	LARGE_INTEGER file_size;
+	GetFileSizeEx(handle, &file_size);
+	return file_size.QuadPart;
+	//void* file;
+	//errno_t error = fopen_s((FILE**)&file, path, "rb");
+	//if (error != 0)
+	//{
+	//	ASSERT(FALSE);	//cant open file!
+	//}
+	//uint32 current_pos, end;
+	//current_pos = ftell((FILE*)file);
+	//fseek((FILE*)file, 0, SEEK_END);
+	//end = ftell((FILE*)file);
+	//fseek((FILE*)file, current_pos, SEEK_SET);
 
-	b32 result = fclose((FILE*)file);
-	if (result != 0)
-	{
-		ASSERT(FALSE);	//cant close file!
-	}
+	//b32 result = fclose((FILE*)file);
+	//if (result != 0)
+	//{
+	//	ASSERT(FALSE);	//cant close file!
+	//}
 	
-	return end;
+	//return end;
 }
 
 uint64 pl_get_tsc()
@@ -169,6 +190,7 @@ uint64 pl_get_tsc()
 	return tsc.QuadPart;
 }
 
+#include <cstdio>
 void pl_debug_print(const char* format, ...)
 {
 	static char buffer[1024];

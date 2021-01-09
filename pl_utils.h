@@ -51,9 +51,12 @@ uint64 pl_get_hardware_entropy();
 
 
 //--------------------------------------<FILE I/O>------------------------------------
+//returns false if file already exists.
+b32 pl_get_file_handle(char* path, void** handle);
 
-//Will load contents of file from beginning of file to block_to_store_into
-void pl_load_file_into(void* block_to_store_into, uint32 bytes_to_load, char* path);
+//Will load contents of file from beginning of file to block_to_store_into. 
+//Returns false if file doesn't exist or if the bytes read isn't equal to file_size.
+b32 pl_load_file_into(void* handle, void* block_to_store_into, uint32 file_size);
 
 //returns true if successfully created and loads file_handle. false if file already exists.
 b32 pl_create_file(void** file_handle, char* path);
@@ -64,7 +67,7 @@ b32 pl_append_to_file(void* file_handle, void* block_to_store, int32 bytes_to_ap
 b32 pl_close_file_handle(void* file_handle);
 
 //returns file size in bytes
-uint32 pl_get_file_size(char* path);
+uint64 pl_get_file_size(void* handle);
 
 //--------------------------------------</FILE I/O>------------------------------------
 
