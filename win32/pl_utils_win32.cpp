@@ -1,4 +1,4 @@
-#include "pl_utils.h"
+	#include "pl_utils.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -47,14 +47,19 @@ static DWORD WINAPI win32_start_thread(__in LPVOID lpParameter)
 
 static HANDLE process_heap = GetProcessHeap();
 
-void pl_buffer_set(void* buffer, int32 value_to_set, int32 no_bytes_to_set)
+void pl_buffer_set(void* buffer, int32 value_to_set, size_t no_bytes_to_set)
 {
 	FillMemory(buffer, no_bytes_to_set, value_to_set);
 }
 
-void pl_buffer_copy(void* destination, void* from, uint32 length)
+void pl_buffer_copy(void* destination, void* from, size_t length)
 {
 	CopyMemory(destination, from, length);
+}
+
+void pl_buffer_move(void* destination, void* source, size_t length)
+{
+	MoveMemory(destination, source, length);
 }
 
 void* pl_buffer_alloc(size_t size)

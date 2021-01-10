@@ -3,13 +3,15 @@
 #include "PL_base_defs.h"
 
 //-------------------------------------------<MEMORY ALLOCATION>-------------------------------------------
-void pl_buffer_set(void* buffer, int32 value_to_set, int32 no_bytes_to_set);
-void pl_buffer_copy(void* destination, void* from, uint32 length);
+void pl_buffer_set(void* buffer, int32 value_to_set, size_t no_bytes_to_set);
+void pl_buffer_copy(void* destination, void* from, size_t length);
 //allocates new buffer and zero inits 
 void* pl_buffer_alloc(size_t size);
 //Reallocs to new buffer, zero inits remainder and frees previous memory. 
 void* pl_buffer_resize(void* block, size_t new_size);
 void pl_buffer_free(void* buffer);
+void pl_buffer_move(void* destination, void* source, size_t length);
+
 //-------------------------------------------</MEMORY ALLOCATION>-------------------------------------------
 
 //------------------------------------------<THREADING>--------------------------------------------
