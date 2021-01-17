@@ -14,8 +14,13 @@
 
 //-----------------------------------------------------<Memory>----------------------------------------------------
 //#define PL_DO_MEMORY_ARENA_ADDON
-//#define MONITOR_ARENA_USAGE
+#define MONITOR_ARENA_USAGE
 
+
+#ifdef MONITOR_ARENA_USAGE
+#define ARENA_MONITOR_CHECK_FOR_POPS
+#define ARENAOWNERLIST_CAPACITY 1000
+#endif
 //-----------------------------------------------------</Memory>----------------------------------------------------
 
 //-----------------------------------------------------<Input>------------------------------------------------------

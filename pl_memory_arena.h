@@ -6,22 +6,19 @@
 #endif
 
 
-#define ARENA_MONITOR_CHECK_FOR_POPS
-
-#define ARENALOCKLIST_CAPACITY 1000
 
 #ifdef MONITOR_ARENA_USAGE
-struct ArenaLockNode
+struct ArenaOwnerNode
 {
 	char* type_name;
 	size_t size;
 };
 
-struct ArenaLockStack
+struct ArenaOwnerStack
 {
-	ArenaLockNode* front = 0;
+	ArenaOwnerNode* front = 0;
 	int32 length = 0;
-	FORCEDINLINE void push_node(ArenaLockNode& new_node)
+	FORCEDINLINE void push_node(ArenaOwnerNode& new_node)
 	{
 		if (front[length - 1].type_name == new_node.type_name)
 		{
@@ -32,13 +29,13 @@ struct ArenaLockStack
 			front[length] = new_node;
 			length++;
 		}
-		if (length > ARENALOCKLIST_CAPACITY)
+		if (length > ARENAOWNERLIST_CAPACITY)
 		{
 			ERRORBOX("Arena Lock Stack overflowed! Too many arena pushes...")
 		}
 	}
 
-	FORCEDINLINE void pop_node(ArenaLockNode* new_node)
+	FORCEDINLINE void pop_node(ArenaOwnerNode* new_node)
 	{
 #ifdef ARENA_MONITOR_CHECK_FOR_POPS
 		if (front[length - 1].type_name != new_node->type_name || front[length - 1].size != new_node->size)
@@ -60,7 +57,7 @@ struct ArenaLockStack
 struct MArena
 {
 #ifdef MONITOR_ARENA_USAGE
-	ArenaLockStack allocations;
+	ArenaOwnerStack allocations;
 #endif
 	void* base = 0;
 	size_t capacity = 0;
@@ -75,7 +72,7 @@ struct MArena
 static inline void init_memory_arena(MArena* arena, size_t capacity, void* base)
 {
 #ifdef MONITOR_ARENA_USAGE
-	arena->allocations.front = (ArenaLockNode*)pl_buffer_alloc(sizeof(ArenaLockNode) * ARENALOCKLIST_CAPACITY);
+	arena->allocations.front = (ArenaOwnerNode*)pl_buffer_alloc(sizeof(ArenaOwnerNode) * ARENAOWNERLIST_CAPACITY);
 #endif
 	arena->base = base;
 	arena->capacity = capacity;
@@ -93,6 +90,7 @@ static inline void cleanup_memory_arena(MArena* arena)
 	arena->top = 0;
 }
 
+//-------------------------<MARENA_PUSH>--------------------------------------------------------------
 FORCEDINLINE void* marena_push(MArena* arena, size_t room_to_make)
 {
 	if (arena->top + room_to_make > arena->capacity)
@@ -115,20 +113,20 @@ FORCEDINLINE void* marena_push(MArena* arena, size_t room_to_make)
 FORCEDINLINE void* monitored_push_arena(MArena* arena, size_t room_to_make, char* name)
 {
 
-	ArenaLockNode new_node = { name, room_to_make };
+	ArenaOwnerNode new_node = { name, room_to_make };
 	arena->allocations.push_node(new_node);
 	void* ret = marena_push(arena, room_to_make);
 	return ret;
 }
 #endif
-
 #ifdef MONITOR_ARENA_USAGE
 #define MARENA_PUSH(arena, size, name) monitored_push_arena(arena, size, (char*)name)
 #else
 #define MARENA_PUSH(arena, size, name) marena_push(arena, size)
 #endif
+//-------------------------</MARENA_PUSH>-------------------------------------------------------------
 
-
+//-------------------------<MARENA_POP>--------------------------------------------------------------
 FORCEDINLINE void marena_pop(MArena* arena, size_t amount_to_pop)
 {
 	if (amount_to_pop > arena->top)
@@ -142,18 +140,27 @@ FORCEDINLINE void marena_pop(MArena* arena, size_t amount_to_pop)
 FORCEDINLINE void monitored_pop_arena(MArena* arena, size_t amount_to_pop, char* name)
 {
 
-	ArenaLockNode pop_node = { name, amount_to_pop };
+	ArenaOwnerNode pop_node = { name, amount_to_pop };
 	arena->allocations.pop_node(&pop_node);
 	marena_pop(arena, amount_to_pop);
 }
 #endif
 
 #ifdef MONITOR_ARENA_USAGE
+//Pops the top of the arena stack and pops arena owner node.
 #define MARENA_POP(arena, size, name) monitored_pop_arena(arena, size, (char*)name)
 #else
+//Pops the top of the arena stack. 
 #define MARENA_POP(arena, size, name) marena_pop(arena, size)
 #endif
+//-------------------------</MARENA_POP>-------------------------------------------------------------
 
+//-------------------------<MARENA_TOP>-------------------------------------------------------------
+FORCEDINLINE void* marena_top(MArena* arena) { return (uint8*)arena->base + arena->top; }
+#define MARENA_TOP(arena) marena_top(arena)
+//-------------------------</MARENA_TOP>------------------------------------------------------------
+
+//Memory Slice. A buffer that acts on a memory arena. 
 template <typename t, typename size_type = size_t>
 struct MSlice
 {
