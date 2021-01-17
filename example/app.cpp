@@ -1,14 +1,14 @@
-#include "pl.h"
-#include "pl_utils.h"
-#include "PL_math.h"
+#include "platform.h"
 
 void initialize(PL& pl)
 {
 	pl.running = TRUE;
 	pl.initialized = FALSE;
+	void* arena_buffer = pl_arena_buffer_alloc(pl.memory.main_arena.capacity);
+	init_memory_arena(&pl.memory.main_arena, pl.memory.main_arena.capacity, arena_buffer);
 	PL_initialize_timing(pl.time);
-	PL_initialize_audio_capture(pl.audio.input);
-	PL_initialize_window(pl.window);
+	PL_initialize_audio_capture(pl.audio.input, &pl.memory.main_arena);
+	PL_initialize_window(pl.window, &pl.memory.main_arena);
 	pl.initialized = TRUE;
 }
 
@@ -31,7 +31,7 @@ void push(PL& pl)
 	if (pl.time.fcurrent_seconds - timing_refresh > 0.1)//refreshing at a tenth(0.1) of a second.
 	{
 		int32 frame_rate = (int32)(pl.time.cycles_per_second / pl.time.delta_cycles);
-		pl_format_print(buffer, 256,"Time per frame: %.*fms , %dFPS\n", 2, (f64)pl.time.fdelta_seconds * 1000, frame_rate);
+		pl_format_print(buffer, 256, "Time per frame: %.*fms , %dFPS\n", 2, (f64)pl.time.fdelta_seconds * 1000, frame_rate);
 		pl.window.title = buffer;
 		timing_refresh = pl.time.fcurrent_seconds;
 	}
@@ -40,9 +40,9 @@ void push(PL& pl)
 
 void cleanup(PL& pl)
 {
-	PL_cleanup_audio_capture(pl.audio.input);
-	//PL_cleanup_audio_render(pl);
-	PL_cleanup_window(pl.window);
+	PL_cleanup_window(pl.window, &pl.memory.main_arena);
+	PL_cleanup_audio_capture(pl.audio.input, &pl.memory.main_arena);
+	cleanup_memory_arena(&pl.memory.main_arena);
 }
 
 inline void draw_rectangle_from_point(uint32 from_x, uint32 from_y, uint32 to_x, uint32 to_y, PL pl, uint8 r, uint8 g, uint8 b)
@@ -59,7 +59,7 @@ inline void draw_rectangle_from_point(uint32 from_x, uint32 from_y, uint32 to_x,
 		for (int x = 0; x < (sign_width * width); x++)
 		{
 			*ptr = color;
-			ptr+= sign_width;
+			ptr += sign_width;
 		}
 		ptr -= width;
 		ptr += sign_height * pl.window.window_bitmap.width;
@@ -67,8 +67,7 @@ inline void draw_rectangle_from_point(uint32 from_x, uint32 from_y, uint32 to_x,
 }
 
 
-
-inline void draw_verticle_line_from_point( uint32 x,uint32 y, int32 height, PL pl, uint8 r, uint8 g, uint8 b)
+inline void draw_verticle_line_from_point(uint32 x, uint32 y, int32 height, PL pl, uint8 r, uint8 g, uint8 b)
 {
 	uint32 color = (uint32)r << 16 | (uint32)g << 8 | (uint32)b << 0;
 	uint32* ptr = (uint32*)pl.window.window_bitmap.buffer + (y * pl.window.window_bitmap.width) + x;
@@ -93,9 +92,8 @@ inline void draw_verticle_line_from_point( uint32 x,uint32 y, int32 height, PL p
 
 void update(PL& pl)
 {
+	pl_buffer_set(pl.window.window_bitmap.buffer, 33, 4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
 
-	pl_buffer_set(pl.window.window_bitmap.buffer, 33,4 * pl.window.window_bitmap.height * pl.window.window_bitmap.width);
-	
 	uint8 red, green, blue;
 	f32 volume = 0;
 	for (uint32 i = 0; i < pl.audio.input.no_of_new_frames; i++)
@@ -112,12 +110,12 @@ void update(PL& pl)
 
 	if (pl.input.keys[PL_KEY::LEFT_CTRL].down && pl.input.mouse.is_in_window)
 	{
-		draw_rectangle_from_point(pl.window.window_bitmap.width/2, pl.window.window_bitmap.height/2, pl.input.mouse.position_x,pl.input.mouse.position_y, pl, 255, 0, 0);
+		draw_rectangle_from_point(pl.window.window_bitmap.width / 2, pl.window.window_bitmap.height / 2, pl.input.mouse.position_x, pl.input.mouse.position_y, pl, 255, 0, 0);
 	}
 
 	if (pl.input.mouse.is_in_window)
 	{
-		draw_rectangle_from_point(pl.input.mouse.position_x, pl.input.mouse.position_y, pl.input.mouse.position_x + 1, pl.input.mouse.position_y + 1, pl,78, 99, 200);
+		draw_rectangle_from_point(pl.input.mouse.position_x, pl.input.mouse.position_y, pl.input.mouse.position_x + 1, pl.input.mouse.position_y + 1, pl, 78, 99, 200);
 	}
 
 	for (uint32 i = 0; i < pl.window.window_bitmap.width; i++)
@@ -136,7 +134,7 @@ void update(PL& pl)
 			draw_verticle_line_from_point(i, pl.window.window_bitmap.height / 4, (int32)left_height, pl, 0, 255, 0);
 			draw_verticle_line_from_point(i, (pl.window.window_bitmap.height * 3) / 4, (int32)right_height, pl, 0, 0, 255);
 		}
-		
+
 
 		if (pl.audio.input.format.no_channels == 1)
 		{
@@ -149,7 +147,7 @@ void update(PL& pl)
 	//f32 added_pos = (f32)(pl.audio.input.format.buffer_frame_count - pl.audio.input.no_of_new_frames) / (f32)pl.audio.input.format.buffer_frame_count;
 	//int32 added_pos_i = (int32)(added_pos * (f32)(pl.window_bltbitmap.width));
 	//draw_verticle_line_from_point(added_pos_i, (pl.window_bltbitmap.height / 2), (pl.window_bltbitmap.height - 10) / 2.0f, pl, 255, 0, 0);
-	
+
 }
 
 void PL_entry_point(PL& pl)
@@ -162,6 +160,9 @@ void PL_entry_point(PL& pl)
 	pl.audio.input.is_loopback = TRUE;
 	pl.window.height = 720;
 	pl.window.width = 1280;
+
+	pl.memory.main_arena.capacity = Megabytes(500);
+
 	initialize(pl);
 	while (pl.running)
 	{

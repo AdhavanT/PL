@@ -2,14 +2,6 @@
 #include "PL_base_defs.h"
 #include <intrin.h>
 
-//-----------------------------------------------
-#define MAX_FLOAT          3.402823466e+38F        // max value
-#define MIN_FLOAT          1.175494351e-38F        // min normalized positive value
-#define UINT32MAX		   0xffffffff			
-#define INV_UINT32_MAX	   2.328306437e-10F
-
-//-----------------------------------------------
-
 //Table for quick uint64 pow(10,x)
 constexpr uint64 INT_POWER_10[20] =
 {
@@ -47,140 +39,6 @@ f64 F64_POWER_10[48] =
 	1.0e0,  1.0e1,  1.0e2,  1.0e3,  1.0e4,  1.0e5,  1.0e6,  1.0e7,  1.0e8,  1.0e9,
 	1.0e10, 1.0e11, 1.0e12, 1.0e13, 1.0e14, 1.0e15, 1.0e16, 1.0e17, 1.0e18, 1.0e19,
 };
-
-// Operations
-
-#define ArrayCount(array) (sizeof(array) / sizeof(array[0]))
-
-//-----------------------
-void pl_buffer_free(void* buffer);
-void* pl_buffer_alloc(size_t size);
-void* pl_buffer_resize(void* block, size_t new_size);
-//-----------------------
-// Collections
-//----------------------
-// DYNAMIC BUFFER
-template<typename t, int32 capacity__ = 1, int32 overflow__ = 5, typename size_type = int32>
-struct DBuffer
-{
-	size_type length = 0;
-	size_type capacity = capacity__;
-	size_type overflow_addon = overflow__;
-	t* front = 0;
-
-	inline t* add(t new_member)
-	{
-		length++;
-		if (front == 0)		//Buffer was not initilized and is being initialized here. 
-		{
-			front = (t*)pl_buffer_alloc(capacity * sizeof(t));
-		}
-		if (length > capacity)
-		{
-			capacity = capacity + overflow_addon;
-			t* temp = (t*)pl_buffer_resize(front, capacity * sizeof(t));
-			ASSERT(temp);	//Not enough memory to realloc, or buffer was never initialized and realloc is trying to allocate to null pointer
-			front = temp;
-		}
-
-		t* temp = front;
-		temp = temp + (length - 1);
-		*temp = new_member;
-		return temp;
-	}
-
-	//Same as add but doesn't perform copy. (Use for BIG objects)
-	inline t* add_nocpy(t& new_member)
-	{
-		length++;
-		if (front == 0)		//Buffer was not initilized and is being initialized here. 
-		{
-			front = (t*)pl_buffer_alloc(capacity * sizeof(t));
-		}
-		if (length > capacity)
-		{
-			capacity = capacity + overflow_addon;
-			t* temp = (t*)pl_buffer_resize(front, capacity * sizeof(t));
-			ASSERT(temp);	//Not enough memory to realloc, or buffer was never initialized and realloc is trying to allocate to null pointer
-			front = temp;
-		}
-
-		t* temp = front;
-		temp = temp + (length - 1);
-		*temp = new_member;
-		return temp;
-	}
-
-	//Clears memory and resets length.
-	FORCEDINLINE void clear_buffer()
-	{
-		if (front != 0)
-		{
-			pl_buffer_free(front);
-			front = 0;
-			length = 0;
-		}
-		//else
-		//{
-		//	ASSERT(FALSE);	//trying to free freed memory
-		//}
-	}
-
-	FORCEDINLINE t& operator [](size_type index)
-	{
-		ASSERT(index >= 0 && index < (size_type)length);
-		return (front[index]);
-	}
-};
-
-// FIXED DYNAMIC BUFFER
-//A wrapper for a non-resizable dynamic buffer 
-template<typename t, typename size_type = int32>
-struct FDBuffer
-{
-	size_type size = 0;
-	t* front = 0;
-
-	//Allocates memory (initilizes to default memory of the type) and returns pointer to allocation
-	inline t* allocate_preserve_type_info(int32 size_)
-	{
-		t tmp;
-		t* front_temp = allocate(size_);
-		for (int i = 0; i < size_; i++)
-		{
-			*front_temp++ = tmp;
-		}
-		return front;
-	}
-
-	//Allocates memory (0 initilized) and returns pointer to allocation
-	FORCEDINLINE t* allocate(size_type size_)
-	{
-		size = size_;
-		front = (t*)pl_buffer_alloc(size * sizeof(t));
-		return front;
-	}
-	//clears size and deallocates memory 
-	FORCEDINLINE void clear()
-	{
-		if (front != 0)
-		{
-			pl_buffer_free(front);
-			front = 0;
-			size = 0;
-		}
-		//else
-		//{
-		//	ASSERT(FALSE);	//trying to free freed memory
-		//}
-	}
-	FORCEDINLINE t& operator [](size_type index)
-	{
-		ASSERT(index >= 0 && index < size);
-		return (front[index]);
-	}
-};
-
 
 //-----------------------
 // Math Data Types
@@ -639,10 +497,10 @@ struct RNG_Stream
 };
 
 #ifdef PL_COMPILER_MSVC
-	#if _MSC_VER > 1800
-	#pragma warning(disable:4146)	//disables the "loss of data u32 to u64" conversion warning
-	#pragma warning(disable:4244)	//disables the negation on unsigned int (rot) warning
-	#endif
+#if _MSC_VER > 1800
+#pragma warning(disable:4146)	//disables the "loss of data u32 to u64" conversion warning
+#pragma warning(disable:4244)	//disables the negation on unsigned int (rot) warning
+#endif
 #endif
 //implemented from https://www.pcg-random.org/
 FORCEDINLINE uint32 random_u32(RNG_Stream* stream)
@@ -657,10 +515,10 @@ FORCEDINLINE uint32 random_u32(RNG_Stream* stream)
 	return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
 }
 #ifdef PL_COMPILER_MSVC
-	#if _MSC_VER > 1800
-	#pragma warning(default:4244)  
-	#pragma warning(default:4146)  
-	#endif
+#if _MSC_VER > 1800
+#pragma warning(default:4244)  
+#pragma warning(default:4146)  
+#endif
 #endif
 
 //returns random number between 0 and 1

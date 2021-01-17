@@ -1,6 +1,7 @@
 #include "pl.h"
 #include "pl_config.h"
 #include "pl_utils.h"
+#include "pl_memory_arena.h"
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
@@ -161,6 +162,134 @@ void PL_initialize_window(PL_Window& window)
 
 }
 
+void PL_initialize_window(PL_Window& window, MArena* arena)
+{
+
+	int window_width, window_height;
+	if (window.height == 0)	//if uninitialized
+	{
+		window_height = CW_USEDEFAULT;
+	}
+	else
+	{
+		window_height = window.height;
+	}
+	if (window.width == 0)
+	{
+		window_width = CW_USEDEFAULT;
+	}
+	else
+	{
+		window_width = window.width;
+	}
+
+	if (window.title == 0)
+	{
+		window.title = (char*)"Win32 PL test";
+	}
+
+	if (window_width != CW_USEDEFAULT && window_height != CW_USEDEFAULT)
+	{
+		RECT window_rectangle;
+		window_rectangle.left = 0;
+		window_rectangle.right = window.width;
+		window_rectangle.top = 0;
+		window_rectangle.bottom = window.height;
+		if (AdjustWindowRect(&window_rectangle, WS_OVERLAPPEDWINDOW, 0))
+		{
+			window_width = window_rectangle.right - window_rectangle.left;
+			window_height = window_rectangle.bottom - window_rectangle.top;
+		}
+	}
+
+	WNDCLASSA wnd_class = {};
+	wnd_class.lpfnWndProc = wnd_proc;
+	wnd_class.lpszClassName = "pl_window_class";
+	wnd_class.style = CS_VREDRAW | CS_HREDRAW;
+	wnd_class.hInstance = pl_specific->hInstance;
+	wnd_class.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(32515));
+
+	HRESULT s = RegisterClassA(&wnd_class);
+	ASSERT(s != 0);
+
+	pl_specific->wnd_handle = CreateWindowExA(
+		0,
+		wnd_class.lpszClassName,
+		window.title,
+		WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+		window.position_x,
+		window.position_y,
+		window_width,
+		window_height,
+		0,
+		0,
+		0,
+		0
+	);
+	ASSERT(pl_specific->wnd_handle);
+	//ShowWindow(pl_specific->wnd_handle, SW_SHOW);
+
+	//This passes a pointer to pl to the wnd_proc message callback. (It's retrieved by GetWindowLongPtrA(hwnd, GWLP_USERDATA))
+	SetWindowLongPtrA(pl_specific->wnd_handle, GWLP_USERDATA, (LONG_PTR)&window);
+
+	pl_specific->main_fiber = ConvertThreadToFiber(0);
+	ASSERT(pl_specific->main_fiber);
+	pl_specific->message_fiber = CreateFiber(0, (PFIBER_START_ROUTINE)wnd_message_fiber_proc, &window);
+	ASSERT(pl_specific->message_fiber);
+
+	pl_specific->main_monitor_DC = GetDC(pl_specific->wnd_handle);
+
+
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	if (window.window_bitmap.height == 0 || window.window_bitmap.width == 0)	//uninitialized
+	{
+		window.window_bitmap.height = window.height;
+		window.window_bitmap.width = window.width;
+	}
+	if (window.window_bitmap.bytes_per_pixel == 0)
+	{
+		window.window_bitmap.bytes_per_pixel = 4;
+	}
+	window.window_bitmap.pitch = window.window_bitmap.bytes_per_pixel * window.window_bitmap.width;
+	window.window_bitmap.size = window.window_bitmap.pitch * window.window_bitmap.height;
+
+	if ((window.window_bitmap.buffer == 0) && (window.window_bitmap.size != 0))
+	{
+		window.window_bitmap.buffer = MARENA_PUSH(arena, window.window_bitmap.size, "PL-(WINDOW BITMAP)");
+	}
+	ASSERT(window.window_bitmap.buffer);
+
+	BITMAPINFO* bmi = &pl_specific->window_bmi_header;
+	bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
+	bmi->bmiHeader.biBitCount = 8 * window.window_bitmap.bytes_per_pixel;
+	bmi->bmiHeader.biCompression = BI_RGB;
+	bmi->bmiHeader.biPlanes = 1;
+	bmi->bmiHeader.biHeight = window.window_bitmap.height;
+	bmi->bmiHeader.biWidth = window.window_bitmap.width;
+#endif
+
+	//polling once
+	SwitchToFiber(pl_specific->message_fiber);
+	RECT client_rectangle = {};
+	GetClientRect(pl_specific->wnd_handle, &client_rectangle);
+
+	window.width = client_rectangle.right - client_rectangle.left;
+	window.height = client_rectangle.bottom - client_rectangle.top;
+
+	POINT window_position = {};
+	ClientToScreen(pl_specific->wnd_handle, &window_position);
+
+	window.position_x = window_position.x;
+	window.position_y = window_position.y;
+
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	//FIXME: This clears the window to black on resizing to avoid the extra window(outside bitmap) from copying the previous frame. 
+	//It also causes random black frames while resizing.
+	PatBlt(pl_specific->main_monitor_DC, 0, 0, window.width, window.height, BLACKNESS);
+#endif
+
+}
+
 //a fiber to handle messages to keep main loop going while doing so.
 //A 1ms timer alerts the message callback when to switch to the main loop fiber.
 void CALLBACK wnd_message_fiber_proc(PL_Window& window)
@@ -283,13 +412,19 @@ void PL_push_window(PL_Window& window, b32 refresh_window_title)
 #endif
 }
 
+void PL_cleanup_window(PL_Window& window, MArena* arena)
+{
+#if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	MARENA_POP(arena, window.window_bitmap.size, "PL-(WINDOW BITMAP)");
+#endif
+}
+
 void PL_cleanup_window(PL_Window& window)
 {
 #if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
 	pl_buffer_free(window.window_bitmap.buffer);
 #endif
 }
-
 //-------------------------------</win32 window stuff>----------------------------------------
 
 //-------------------------------<timing stuff>-----------------------------------------------
@@ -587,6 +722,132 @@ void PL_initialize_audio_capture(PL_Audio_Input& input)
 	PL_poll_audio_capture(input);
 }
 
+
+void PL_initialize_audio_capture(PL_Audio_Input& input, MArena* arena)
+{
+	CoInitializeEx(0, COINIT_MULTITHREADED);//ASSESS: whether i should use COINIT_MULTITHREADED or COINIT_APARTMENTTHREADED
+	IMMDeviceEnumerator* pEnumerator = 0;
+
+	IMMDevice* input_endpoint = 0;
+
+	IAudioClient* input_audio_client;
+
+	HRESULT result;
+	result = CoCreateInstance(__uuidof(MMDeviceEnumerator), 0, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+	ASSERT(!FAILED(result));
+
+	if (input.is_loopback)
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &input_endpoint);//It's eRender instead of eCapture cause input is loopback.
+		ASSERT(result == S_OK);
+	}
+	else
+	{
+		result = pEnumerator->GetDefaultAudioEndpoint(eCapture, eMultimedia, &input_endpoint);
+		ASSERT(result == S_OK);
+	}
+
+
+
+	result = input_endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, 0, (void**)&input_audio_client);
+	ASSERT(result == S_OK);
+
+
+	WAVEFORMATEX ipf = {};
+	DWORD input_stream_flags = AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+	WAVEFORMATEX* q_ipf;
+	(input_audio_client)->GetMixFormat(&q_ipf);
+
+	//setting defaults (non-initialized values in format)
+	if (input.format.no_bits_per_sample == 0)
+	{
+		input.format.no_bits_per_sample = q_ipf->wBitsPerSample;
+	}
+	if (input.format.no_channels == 0)
+	{
+		input.format.no_channels = q_ipf->nChannels;
+	}
+	if (input.format.samples_per_second == 0)
+	{
+		input.format.samples_per_second = q_ipf->nSamplesPerSec;
+	}
+
+	if (input.is_loopback)
+	{
+		input_stream_flags = input_stream_flags | AUDCLNT_STREAMFLAGS_LOOPBACK;
+	}
+
+	ipf.wFormatTag = WAVE_FORMAT_PCM;
+	ipf.nChannels = input.format.no_channels;
+	ipf.nSamplesPerSec = input.format.samples_per_second;
+	ipf.nBlockAlign = (input.format.no_channels * input.format.no_bits_per_sample) / 8;
+	ipf.nAvgBytesPerSec = input.format.samples_per_second * ipf.nBlockAlign;
+	ipf.wBitsPerSample = input.format.no_bits_per_sample;
+
+
+	// REFERENCE_TIME time units per second and per millisecond
+#define REFTIMES_PER_SEC  10000000
+
+	if (input.format.buffer_duration_seconds == 0 && input.format.buffer_frame_count == 0)
+	{
+		input.format.buffer_duration_seconds = 1.0f;
+	}
+	else if (input.format.buffer_duration_seconds == 0 && input.format.buffer_frame_count != 0)
+	{
+		input.format.buffer_duration_seconds = REFTIMES_PER_SEC * (f32)input.format.buffer_frame_count;
+		input.format.buffer_duration_seconds /= (f32)input.format.samples_per_second;
+	}
+
+	uint32 duration = (uint32)(input.format.buffer_duration_seconds * (f32)REFTIMES_PER_SEC);
+	result = (input_audio_client)->Initialize(AUDCLNT_SHAREMODE_SHARED, input_stream_flags, duration, 0, &ipf, 0);
+	ASSERT(result == S_OK);
+
+	result = (input_audio_client)->GetBufferSize(&input.format.buffer_frame_count);
+	ASSERT(result == S_OK);
+
+	input.format.buffer_duration_seconds = (f32)input.format.buffer_frame_count / (f32)input.format.samples_per_second;
+#undef REFTIMES_PER_SEC
+
+	result = (input_audio_client)->GetService(__uuidof(IAudioCaptureClient), (void**)&pl_specific->input_capture_client);
+	ASSERT(result == S_OK);
+
+	result = (input_audio_client)->Start();
+	ASSERT(result == S_OK);
+
+	uint8 bytes_per_frame = input.format.no_channels * (input.format.no_bits_per_sample / 8);
+
+	pl_specific->input_fifo_buffer = MARENA_PUSH(arena, (input.format.buffer_frame_count * bytes_per_frame), "PL-(WIN32 SPECIFIC AUDIO CAPTURE FIFO BUFFER)");
+
+	input.sink_buffer = (f32*)MARENA_PUSH(arena, input.format.buffer_frame_count * sizeof(f32) * input.format.no_channels, "PL-(AUDIO CAPTURE)");
+
+	CoTaskMemFree(q_ipf);
+	pEnumerator->Release();
+	input_endpoint->Release();
+	input_audio_client->Release();
+
+	if (input.format.no_bits_per_sample == 16 && input.format.no_channels == 2)
+	{
+		pl_specific->transfer_to_sink_buffer = transfer_capture_16bit_2channel;
+	}
+	else if (input.format.no_bits_per_sample == 16 && input.format.no_channels == 1)
+	{
+		pl_specific->transfer_to_sink_buffer = transfer_capture_16bit_1channel;
+	}
+	else if (input.format.no_bits_per_sample == 32 && input.format.no_channels == 2)
+	{
+		pl_specific->transfer_to_sink_buffer = transfer_capture_32bit_2channel;
+	}
+	else if (input.format.no_bits_per_sample == 32 && input.format.no_channels == 1)
+	{
+		pl_specific->transfer_to_sink_buffer = transfer_capture_32bit_1channel;
+	}
+	else
+	{
+		ASSERT(FALSE);	//non-supported audio bit-rate, channel format
+	}
+	PL_poll_audio_capture(input);
+}
+
 //functions responsible for shifting the sink_buffer and adding the new frames polled from the fifo buffer
 static void transfer_capture_16bit_2channel(PL_Audio_Input& input)
 {
@@ -779,11 +1040,16 @@ void PL_cleanup_audio_capture(PL_Audio_Input& input)
 	pl_buffer_free(input.sink_buffer);
 	pl_specific->input_capture_client->Release();
 }
+void PL_cleanup_audio_capture(PL_Audio_Input& input, MArena* arena)
+{
+	uint8 bytes_per_frame = input.format.no_channels * (input.format.no_bits_per_sample / 8);
+	MARENA_POP(arena, input.format.buffer_frame_count * sizeof(f32) * input.format.no_channels, "PL-(AUDIO CAPTURE)");
+	MARENA_POP(arena, (input.format.buffer_frame_count * bytes_per_frame), "PL-(WIN32 SPECIFIC AUDIO CAPTURE FIFO BUFFER)");
+	pl_specific->input_capture_client->Release();
+}
 //-------------------------------</Audio Capture stuff>----------------------------------
 
 //-------------------------------</Win32 Audio stuff>------------------------------------------
-
-
 
 
 //--------------------------------<Win32 ENTRY POINT>------------------------------------------

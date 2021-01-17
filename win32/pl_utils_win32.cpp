@@ -1,4 +1,4 @@
-	#include "pl_utils.h"
+#include "pl_utils.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -62,6 +62,25 @@ void pl_buffer_move(void* destination, void* source, size_t length)
 	MoveMemory(destination, source, length);
 }
 
+
+void* pl_arena_buffer_alloc(size_t size)
+{
+	return VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+}
+
+void* pl_arena_buffer_resize(void* block, size_t old_size, size_t new_size)
+{
+	void* new_buffer = VirtualAlloc(0, new_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	CopyMemory(new_buffer, block, old_size);
+	VirtualFree(block, 0, MEM_RELEASE);
+	return new_buffer;
+}
+
+void pl_arena_buffer_free(void* arena_buffer)
+{
+	VirtualFree(arena_buffer, 0, MEM_RELEASE);
+}
+
 void* pl_buffer_alloc(size_t size)
 {
 	return HeapAlloc(process_heap, HEAP_ZERO_MEMORY, size);
@@ -75,7 +94,7 @@ void* pl_buffer_resize(void* block, size_t new_size)
 
 void pl_buffer_free(void* buffer)
 {
-	HeapFree(process_heap,0,buffer);
+	HeapFree(process_heap, 0, buffer);
 }
 
 ThreadHandle pl_create_thread(ThreadProc proc, void* data)
@@ -97,7 +116,7 @@ void pl_sleep_thread(uint32 timeout_in_ms)
 }
 
 
-b32 pl_load_file_into(void* handle,void* block_to_store_into, uint32 file_size)
+b32 pl_load_file_into(void* handle, void* block_to_store_into, uint32 file_size)
 {
 	DWORD read_bytes;
 	b32 success;
@@ -121,7 +140,7 @@ b32 pl_load_file_into(void* handle,void* block_to_store_into, uint32 file_size)
 	//}
 }
 
-b32 pl_create_file(void** file_handle,char* path)
+b32 pl_create_file(void** file_handle, char* path)
 {
 	*file_handle = CreateFileA(path, GENERIC_WRITE, 0, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
 	if (INVALID_HANDLE_VALUE == file_handle)
@@ -184,7 +203,7 @@ uint64 pl_get_file_size(void* handle)
 	//{
 	//	ASSERT(FALSE);	//cant close file!
 	//}
-	
+
 	//return end;
 }
 
@@ -193,6 +212,11 @@ uint64 pl_get_tsc()
 	LARGE_INTEGER tsc;
 	QueryPerformanceCounter(&tsc);
 	return tsc.QuadPart;
+}
+
+void pl_throw_error_box(const char* error)
+{
+	MessageBoxA(0, error, "INVALID CODE PATH!", MB_ICONSTOP | MB_OK);
 }
 
 #include <cstdio>
