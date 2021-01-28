@@ -1,8 +1,7 @@
 #pragma once
 
 //-----------------------------------------------
-#include "PL_base_defs.h"
-#include "pl_config.h"
+#include "pl_base_defs.h"
 struct PL;
 typedef void(*PL_Function)(PL& pl);	//used for functions that are different for different modes. Ex: PL_push_window() is different for opengl and for bit-blitting using a bitmap. 
 
@@ -136,8 +135,10 @@ void PL_poll_input_gamepad(PL_Input_Gamepad& pl);
 struct PL_Input_Mouse
 {
 	b32 is_in_window;
+	int32 scroll_delta;
 	int32 position_x;
 	int32 position_y;
+	PL_Digital_Button middle;
 	PL_Digital_Button left;
 	PL_Digital_Button right;
 };
@@ -254,6 +255,3 @@ struct PL
 };
 
 void PL_entry_point(PL& pl);
-
-#define PL_CONFIG_UNDEF
-#include"pl_config.h"

@@ -79,6 +79,16 @@ static inline void init_memory_arena(MArena* arena, size_t capacity, void* base)
 	arena->top = 0;
 }
 
+static inline void init_memory_arena(MArena* arena, size_t capacity)
+{
+#ifdef MONITOR_ARENA_USAGE
+	arena->allocations.front = (ArenaOwnerNode*)pl_buffer_alloc(sizeof(ArenaOwnerNode) * ARENAOWNERLIST_CAPACITY);
+#endif
+	arena->base = pl_arena_buffer_alloc(capacity);
+	arena->capacity = capacity;
+	arena->top = 0;
+}
+
 static inline void cleanup_memory_arena(MArena* arena)
 {
 #ifdef MONITOR_ARENA_USAGE
@@ -97,11 +107,17 @@ FORCEDINLINE void* marena_push(MArena* arena, size_t room_to_make)
 	{
 #ifdef PL_DO_MEMORY_ARENA_ADDON
 		//To grow the arena:
-		size_t new_capacity = arena->capacity + arena->overflow_addon_size;
+		if (arena->overflow_addon_size == 0)
+		{
+			ERRORBOX("MArena has overflowed! Can't do addon!")
+		}
+		size_t extra = arena->top + room_to_make - arena->capacity;
+		size_t multiplier = (extra + (arena->overflow_addon_size - 1)) / arena->overflow_addon_size;
+		size_t new_capacity = arena->capacity + multiplier * arena->overflow_addon_size;
 		arena->base = pl_arena_buffer_resize(arena->base, arena->capacity, new_capacity);
 		arena->capacity = new_capacity;
 #else
-		ERRORBOX("MArena has overflowed!")
+		ERRORBOX("MArena has overflowed! Addon is turned off!")
 #endif
 	}
 	void* top = (uint8*)arena->base + arena->top;
@@ -172,20 +188,36 @@ struct MSlice
 	size_type size = 0;
 
 #ifdef MONITOR_ARENA_USAGE
-	FORCEDINLINE t* init(MArena* arena, char* _name)
+	FORCEDINLINE void init(MArena* arena, const char* _name)
 	{
-		name = _name;
+		name = (char*)_name;
 		ASSERT(front == 0);
-		front = (t*)MARENA_PUSH(arena, 0, name);
+		front = (t*)MARENA_TOP(arena);
 	}
 #else
-	FORCEDINLINE t* init(MArena* arena, char* _name)
+	FORCEDINLINE void init(MArena* arena, const char* _name)
 	{
 		ASSERT(front == 0);
-		front = (t*)MARENA_PUSH(arena, 0, name);
+		front = (t*)MARENA_TOP(arena);
 	}
 #endif
 
+#ifdef MONITOR_ARENA_USAGE
+	FORCEDINLINE t* init_and_allocate(MArena* arena, size_type no_of_elements, const char* _name)
+	{
+		size = no_of_elements;
+		name = _name;
+		ASSERT(front == 0);
+		front = (t*)MARENA_PUSH(arena, size * sizeof(t), name);
+	}
+#else
+	FORCEDINLINE t* init_and_allocate(MArena* arena, size_type no_of_elements, const char* _name)
+	{
+		size = no_of_elements;
+		ASSERT(front == 0);
+		front = (t*)MARENA_PUSH(arena, size * sizeof(t), name);
+	}
+#endif
 
 	FORCEDINLINE t* add(MArena* arena, t new_member)
 	{

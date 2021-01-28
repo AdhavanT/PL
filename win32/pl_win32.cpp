@@ -1,5 +1,4 @@
 #include "pl.h"
-#include "pl_config.h"
 #include "pl_utils.h"
 #include "pl_memory_arena.h"
 #include <windows.h>
@@ -27,6 +26,10 @@ struct Win32Specific
 	void (*transfer_to_sink_buffer)(PL_Audio_Input& input);
 	//Audio Render Stuff
 	IAudioClient* output;
+
+	//Mouse input - scroll wheel
+	int16 mouse_wheel_delta;
+	b32 mouse_wheel_updated;
 };
 
 static Win32Specific* pl_specific;
@@ -345,11 +348,16 @@ LRESULT static CALLBACK wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 	case WM_QUIT:
 	{
 		*pl_specific->pointer_to_pl_running = FALSE;
-	}
+	}break;
 
 	case WM_TIMER:
 	{
 		SwitchToFiber((pl_specific)->main_fiber);
+	}break;
+	case WM_MOUSEWHEEL:
+	{
+		pl_specific->mouse_wheel_delta = GET_WHEEL_DELTA_WPARAM(wParam);
+		pl_specific->mouse_wheel_updated = TRUE;
 	}break;
 
 	default:
@@ -477,7 +485,7 @@ inline void update_digital_button(PL_Digital_Button& bt, b32 down)
 void PL_initialize_input_mouse(PL_Input_Mouse& mouse)
 {
 	//Initializing mouse input
-
+	pl_specific->mouse_wheel_updated = FALSE;
 }
 
 void PL_poll_input_mouse(PL_Input_Mouse& mouse, PL_Window& main_window)
@@ -491,8 +499,21 @@ void PL_poll_input_mouse(PL_Input_Mouse& mouse, PL_Window& main_window)
 	mouse.is_in_window = (mouse.position_x >= 0 && mouse.position_x < (int32)main_window.width) && (mouse.position_y >= 0 && mouse.position_y < (int32)main_window.height);
 	SHORT lb = GetKeyState(VK_LBUTTON);
 	SHORT rb = GetKeyState(VK_RBUTTON);
+	SHORT mb = GetKeyState(VK_MBUTTON);
+
 	update_digital_button(mouse.left, lb >> 7);
 	update_digital_button(mouse.right, rb >> 7);
+	update_digital_button(mouse.middle, mb >> 7);
+	if (pl_specific->mouse_wheel_updated)
+	{
+		pl_specific->mouse_wheel_updated = FALSE;
+		int32 scroll_delta = (int32)pl_specific->mouse_wheel_delta / WHEEL_DELTA;
+		mouse.scroll_delta = scroll_delta;
+	}
+	else
+	{
+		mouse.scroll_delta = 0;
+	}
 }
 
 void PL_initialize_input_keyboard(PL_Input_Keyboard& keyboard)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PL_base_defs.h"
+#include "pl_base_defs.h"
 
 //-------------------------------------------<MEMORY ALLOCATION>-------------------------------------------
 void pl_buffer_set(void* buffer, int32 value_to_set, size_t no_bytes_to_set);
