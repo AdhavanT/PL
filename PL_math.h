@@ -71,6 +71,12 @@ struct Vec2
 
 	FORCEDINLINE Vec2<t> operator / (f32 n) { Vec2<t> ans = { x / n, y / n }; return ans; };
 
+
+	FORCEDINLINE b32 operator != (Vec2<t> rhs) { b32 ans = !(x == rhs.x && y == rhs.y); return ans; };
+
+	FORCEDINLINE b32 operator == (Vec2<t> rhs) { b32 ans = (x == rhs.x && y == rhs.y); return ans; };
+
+
 };
 typedef Vec2<f32> vec2f;
 typedef Vec2<uint32> vec2ui;
@@ -115,7 +121,6 @@ struct Vec3
 	FORCEDINLINE void operator -= (Vec3<t> n) { x -= n.x; y -= n.y; z -= n.z; };
 	FORCEDINLINE void operator -= (f32 n) { x -= n; y -= n; z -= n; };
 
-	FORCEDINLINE bool operator != (Vec3<t> b) { return (x == b.x && (y == b.y && z == b.z)); };
 
 	FORCEDINLINE Vec3<t> operator * (f32 n) { Vec3<t> ans = { x * n, y * n, z * n }; return ans; };
 	FORCEDINLINE void operator *= (f32 n) { x *= n; y *= n; z *= n; };
@@ -123,6 +128,8 @@ struct Vec3
 	FORCEDINLINE Vec3<t> operator / (f32 n) { Vec3<t> ans = { x / n, y / n, z / n }; return ans; };
 	FORCEDINLINE Vec3<f32> inverse() { Vec3<t> ans = { 1 / x,1 / y,1 / z }; return ans; };
 
+	FORCEDINLINE b32 operator != (Vec3<t> rhs) { b32 ans = !(x == rhs.x && y == rhs.y && z == rhs.z); return ans; };
+	FORCEDINLINE b32 operator == (Vec3<t> rhs) { b32 ans = (x == rhs.x && y == rhs.y && z == rhs.z); return ans; };
 };
 typedef Vec3<f32> vec3f;
 typedef Vec3<uint32> vec3ui;
@@ -170,14 +177,14 @@ struct Vec4
 	FORCEDINLINE Vec4<t> operator - (Vec4<t> n) { Vec4<t> ans = { x - n.x, y - n.y, z - n.z, w - n.w }; return ans; }
 	FORCEDINLINE void operator -= (Vec4<t> n) { x -= n.x; y -= n.y; z -= n.z; w -= n.w; }
 
-	FORCEDINLINE bool operator != (Vec4<t> b) { return (z == b.z && (x == b.x && (y == b.y && z == b.z))); };
-
 	FORCEDINLINE Vec4<t> operator * (f32 n) { Vec4<t> ans = { x * n, y * n, z * n, w * n }; return ans; }
 	FORCEDINLINE void operator *= (f32 n) { x *= n; y *= n; z *= n; w *= n; }
 
 	FORCEDINLINE Vec4<t> operator / (f32 n) { Vec4<t> ans = { x / n, y / n, z / n, w / n }; return ans; }
 	FORCEDINLINE f32 operator * (Vec4<t> n) { return (x * n.x) + (y * n.y) + (z * n.z); }
 
+	FORCEDINLINE b32 operator != (Vec4<t> rhs) { b32 ans = !(x == rhs.x && y == rhs.y && z == rhs.z && w == rhs.w); return ans; };
+	FORCEDINLINE b32 operator == (Vec4<t> rhs) { b32 ans = (x == rhs.x && y == rhs.y && z == rhs.z && w == rhs.w); return ans; };
 };
 typedef Vec4<f32> vec4f;
 typedef Vec4<uint32> vec4ui;
