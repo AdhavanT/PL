@@ -160,7 +160,7 @@ void PL_entry_point(PL& pl)
 	pl.audio.input.is_loopback = TRUE;
 	pl.window.height = 720;
 	pl.window.width = 1280;
-
+	pl.window.user_resizable = FALSE;
 	pl.memory.main_arena.capacity = Megabytes(500);
 
 	initialize(pl);

@@ -188,14 +188,14 @@ struct MSlice
 	size_type size = 0;
 
 #ifdef MONITOR_ARENA_USAGE
-	FORCEDINLINE void init(MArena* arena, const char* _name)
+	FORCEDINLINE void init(MArena* arena,const char* _name)
 	{
 		name = (char*)_name;
 		ASSERT(front == 0);
 		front = (t*)MARENA_TOP(arena);
 	}
 #else
-	FORCEDINLINE void init(MArena* arena, const char* _name)
+	FORCEDINLINE void init(MArena* arena,const char* _name)
 	{
 		ASSERT(front == 0);
 		front = (t*)MARENA_TOP(arena);
@@ -203,10 +203,10 @@ struct MSlice
 #endif
 
 #ifdef MONITOR_ARENA_USAGE
-	FORCEDINLINE t* init_and_allocate(MArena* arena, size_type no_of_elements, const char* _name)
+	FORCEDINLINE void init_and_allocate(MArena* arena, size_type no_of_elements, const char* _name)
 	{
 		size = no_of_elements;
-		name = _name;
+		name = (char*)_name;
 		ASSERT(front == 0);
 		front = (t*)MARENA_PUSH(arena, size * sizeof(t), name);
 	}

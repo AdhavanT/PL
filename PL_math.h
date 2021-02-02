@@ -65,7 +65,8 @@ struct Vec2
 	FORCEDINLINE Vec2<t> operator - (Vec2<t> n) { Vec2<t> ans = { x - n.x, y - n.y }; return ans; };
 	FORCEDINLINE void operator -= (Vec2<t> n) { x -= n.x; y -= n.y; };
 
-	FORCEDINLINE Vec2<t> operator * (f32 n) { Vec2<t> ans = { x * n, y * n }; return ans; }
+	FORCEDINLINE Vec2<t> operator * (f32 n) { Vec2<t> ans = { x * n, y * n }; return ans; };
+
 	FORCEDINLINE void operator *= (f32 n) { x *= n; y *= n; };
 
 	FORCEDINLINE Vec2<t> operator / (f32 n) { Vec2<t> ans = { x / n, y / n }; return ans; };
@@ -420,6 +421,18 @@ FORCEDINLINE vec3f hadamard(vec3f a, vec3f b) { vec3f ans = { a.x * b.x, a.y * b
 
 //Returns |a|*|b|* sin(theta) * n_cap(n_cap is normalized perpendicular to a and b)
 FORCEDINLINE vec3f cross(vec3f a, vec3f b) { vec3f ans = { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; return ans; }
+
+//used to interpolate between vectors. value should be between 0 and 1.
+FORCEDINLINE f32 lerp(f32 start, f32 towards, f32 interpolation)
+{
+	return { (towards - start) / interpolation };
+}
+
+//used to interpolate between vectors. value should be between 0 and 1.
+FORCEDINLINE f64 lerp(f64 start, f64 towards, f64 interpolation)
+{
+	return { (towards - start) / interpolation };
+}
 
 //used to interpolate between vectors. value should be between 0 and 1.
 FORCEDINLINE vec2f lerp(vec2f start, vec2f towards, f32 interpolation)

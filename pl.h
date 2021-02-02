@@ -40,6 +40,7 @@ struct PL_Window
 #elif PL_WINDOW_RENDERTYPE == PL_OPENGL
 	//opengl context stuff
 #endif
+	b32 user_resizable;
 	b32 was_altered;
 	int32 position_x;
 	int32 position_y;
@@ -239,7 +240,7 @@ struct PL_Audio
 struct PL_Memory
 {
 	MArena main_arena;
-
+	MArena temp_arena;
 };
 
 struct PL

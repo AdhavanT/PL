@@ -87,11 +87,17 @@ void PL_initialize_window(PL_Window& window)
 	HRESULT s = RegisterClassA(&wnd_class);
 	ASSERT(s != 0);
 
+	DWORD window_styles = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
+	if (window.user_resizable == TRUE)
+	{
+		window_styles = window_styles | WS_SIZEBOX;
+	}
+
 	pl_specific->wnd_handle = CreateWindowExA(
 		0,
 		wnd_class.lpszClassName,
 		window.title,
-		WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+		window_styles,
 		window.position_x,
 		window.position_y,
 		window_width,
@@ -215,11 +221,17 @@ void PL_initialize_window(PL_Window& window, MArena* arena)
 	HRESULT s = RegisterClassA(&wnd_class);
 	ASSERT(s != 0);
 
+	DWORD window_styles = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
+	if (window.user_resizable == TRUE)
+	{
+		window_styles = window_styles | WS_SIZEBOX;
+	}
+
 	pl_specific->wnd_handle = CreateWindowExA(
 		0,
 		wnd_class.lpszClassName,
 		window.title,
-		WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+		window_styles,
 		window.position_x,
 		window.position_y,
 		window_width,
@@ -229,7 +241,6 @@ void PL_initialize_window(PL_Window& window, MArena* arena)
 		0,
 		0
 	);
-	ASSERT(pl_specific->wnd_handle);
 	//ShowWindow(pl_specific->wnd_handle, SW_SHOW);
 
 	//This passes a pointer to pl to the wnd_proc message callback. (It's retrieved by GetWindowLongPtrA(hwnd, GWLP_USERDATA))
