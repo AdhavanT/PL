@@ -344,6 +344,12 @@ FORCEDINLINE t max(t a, t b)
 {
 	return a > b ? a : b;
 }
+template<typename t>
+FORCEDINLINE t clamp(t value, t bottom, t top)
+{
+	return max(bottom, min(value, top));
+}
+
 
 //TODO: get rid of this sometime later when you feel like it...no rush tho
 #include <math.h>
