@@ -149,6 +149,8 @@ void PL_poll_input_mouse(PL_Input_Mouse& pl, PL_Window& main_window);
 enum PL_KEY
 {
 
+	LEFT = 21, UP, RIGHT, DOWN,
+
 	NUM_0 = 48, NUM_1, NUM_2,
 	NUM_3, NUM_4, NUM_5,
 	NUM_6, NUM_7, NUM_8, NUM_9,
