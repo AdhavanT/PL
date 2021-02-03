@@ -350,6 +350,20 @@ FORCEDINLINE t clamp(t value, t bottom, t top)
 	return max(bottom, min(value, top));
 }
 
+//used to interpolate between vectors. value should be between 0 and 1.
+template<typename t>
+FORCEDINLINE t lerp(t start, t towards, f32 interpolation)
+{
+	return { ((towards - start) * interpolation) + start };
+}
+
+//used to interpolate between vectors. value should be between 0 and 1.
+template<typename t>
+FORCEDINLINE t lerp(t start, t towards, f64 interpolation)
+{
+	return { ((towards - start) * interpolation) + start };
+}
+
 
 //TODO: get rid of this sometime later when you feel like it...no rush tho
 #include <math.h>
@@ -385,6 +399,21 @@ FORCEDINLINE f32 mag(vec2f vector)
 {
 	return { sqroot(mag2(vector)) };
 }
+
+FORCEDINLINE void normalize(vec2f& v)
+{
+	f32 inv_sqr_root = mag2(v);
+	inv_sqr_root = _mm_cvtss_f32(_mm_invsqrt_ps(_mm_set_ss(inv_sqr_root)));
+	v = v * inv_sqr_root;
+}
+
+FORCEDINLINE vec2f clamp(vec2f v, f32 lower, f32 upper)
+{
+	v.x = clamp(v.x, lower, upper);
+	v.y = clamp(v.y, lower, upper);
+	return v;
+}
+
 //----</Vec2>----
 
 //----<Vec3>-----
@@ -404,6 +433,23 @@ FORCEDINLINE void normalize(vec3f& v)
 	inv_sqr_root = _mm_cvtss_f32(_mm_invsqrt_ps(_mm_set_ss(inv_sqr_root)));
 	v = v * inv_sqr_root;
 }
+
+FORCEDINLINE vec3f clamp(vec3f v, f32 lower, f32 upper)
+{
+	v.x = clamp(v.x, lower, upper);
+	v.y = clamp(v.y, lower, upper);
+	v.z = clamp(v.z, lower, upper);
+	return v;
+}
+
+//Returns |p|*|n|*cos(theta) 
+FORCEDINLINE f32 dot(vec3f p, vec3f n) { return (p.x * n.x) + (p.y * n.y) + (p.z * n.z); };
+
+//Returns vector as result of multiplication of individual components
+FORCEDINLINE vec3f hadamard(vec3f a, vec3f b) { vec3f ans = { a.x * b.x, a.y * b.y, a.z * b.z }; return ans; }
+
+//Returns |a|*|b|* sin(theta) * n_cap(n_cap is normalized perpendicular to a and b)
+FORCEDINLINE vec3f cross(vec3f a, vec3f b) { vec3f ans = { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; return ans; }
 //----</Vec3>----
 
 //----<Vec4>-----
@@ -423,55 +469,22 @@ FORCEDINLINE void normalize(vec4f& v)
 	inv_sqr_root = _mm_cvtss_f32(_mm_invsqrt_ps(_mm_set_ss(inv_sqr_root)));
 	v = v * inv_sqr_root;
 }
-//----</Vec4>----
 
-
-//Returns |p|*|n|*cos(theta) 
-FORCEDINLINE f32 dot(vec3f p, vec3f n) { return (p.x * n.x) + (p.y * n.y) + (p.z * n.z); };
-
-//Returns vector as result of multiplication of individual components
-FORCEDINLINE vec3f hadamard(vec3f a, vec3f b) { vec3f ans = { a.x * b.x, a.y * b.y, a.z * b.z }; return ans; }
-
-//Returns |a|*|b|* sin(theta) * n_cap(n_cap is normalized perpendicular to a and b)
-FORCEDINLINE vec3f cross(vec3f a, vec3f b) { vec3f ans = { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; return ans; }
-
-//used to interpolate between vectors. value should be between 0 and 1.
-FORCEDINLINE f32 lerp(f32 start, f32 towards, f32 interpolation)
+FORCEDINLINE vec4f clamp(vec4f v, f32 lower, f32 upper)
 {
-	return { (towards - start) / interpolation };
-}
+	v.x = clamp(v.x, lower, upper);
+	v.y = clamp(v.y, lower, upper);
+	v.z = clamp(v.z, lower, upper);
+	v.w = clamp(v.w, lower, upper);
 
-//used to interpolate between vectors. value should be between 0 and 1.
-FORCEDINLINE f64 lerp(f64 start, f64 towards, f64 interpolation)
-{
-	return { (towards - start) / interpolation };
-}
-
-//used to interpolate between vectors. value should be between 0 and 1.
-FORCEDINLINE vec2f lerp(vec2f start, vec2f towards, f32 interpolation)
-{
-	return { (towards - start) / interpolation };
-}
-
-FORCEDINLINE vec3f clamp(vec3f v, f32 lower, f32 upper)
-{
-	v.x = max(lower, min(v.x, upper));
-	v.y = max(lower, min(v.y, upper));
-	v.z = max(lower, min(v.z, upper));
 	return v;
 }
 
-//used to interpolate between vectors. value should be between 0 and 1.
-FORCEDINLINE vec3f lerp(vec3f start, vec3f towards, f32 interpolation)
-{
-	return { ((towards - start) * interpolation) + start };
-}
+//----</Vec4>----
 
-//used to interpolate between vectors. value should be between 0 and 1.
-FORCEDINLINE vec4f lerp(vec4f start, vec4f towards, f32 interpolation)
-{
-	return { ((towards - start) * interpolation) + start };
-}
+
+
+
 
 //proper conversion of linear to srgb color space
 inline f32 linear_to_srgb(f32 l)
@@ -484,7 +497,7 @@ inline f32 linear_to_srgb(f32 l)
 	{
 		l = 1.0f;
 	}
-	f32 s = l * 12.92f;;
+	f32 s = l * 12.92f;
 	if (l > 0.0031308f)
 	{
 		s = 1.055f * fpow(l, 1.0f / 2.4f) - 0.055f;
