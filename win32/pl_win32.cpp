@@ -419,6 +419,13 @@ void PL_push_window(PL_Window& window, b32 refresh_window_title)
 	}
 
 #if PL_WINDOW_RENDERTYPE == PL_BLIT_BITMAP
+	//updating the windows bmi header struct with new height and width. 
+	if (window.was_altered)
+	{
+		pl_specific->window_bmi_header.bmiHeader.biWidth = window.window_bitmap.width;
+		pl_specific->window_bmi_header.bmiHeader.biHeight = window.window_bitmap.height;
+
+	}
 	//NOTE:Making sure to keep the buffer-to-monitor pixel mapping consistant. (not stretching the image to fit window.)
 	//NOTE: This is assuming the window is drawing a bitmap 
 	StretchDIBits(
