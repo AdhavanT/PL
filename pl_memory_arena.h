@@ -211,7 +211,7 @@ struct MSlice
 		front = (t*)MARENA_PUSH(arena, size * sizeof(t), name);
 	}
 #else
-	FORCEDINLINE t* init_and_allocate(MArena* arena, size_type no_of_elements, const char* _name)
+	FORCEDINLINE void init_and_allocate(MArena* arena, size_type no_of_elements, const char* _name)
 	{
 		size = no_of_elements;
 		ASSERT(front == 0);
