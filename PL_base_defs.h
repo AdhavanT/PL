@@ -71,8 +71,8 @@ typedef double f64;
 
 #define MAX_FLOAT          3.402823466e+38F        // max value
 #define MIN_FLOAT          1.175494351e-38F        // min normalized positive value
-#define UINT64MAX		   ((uint64)(~(uint64)0))
-#define INT64MAX		   ((int64)(UINT64MAX >> 1))
+#define UINT64MAX		   0xFFFFFFFFFFFFFFFF	//18446744073709551615
+#define INT64MAX		   0x7FFFFFFFFFFFFFFF	//9223372036854775807
 #define UINT32MAX		   0xffffffff			
 #define INV_UINT32_MAX	   2.328306437e-10F
 
