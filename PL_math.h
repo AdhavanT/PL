@@ -611,8 +611,8 @@ FORCEDINLINE int64 interlocked_increment_i64(volatile int64* data)
 #endif
 
 #pragma intrinsic(_InterlockedIncrement)
-//returns resulting decremented value after performing locked decrement(for int32 value)
-FORCEDINLINE int64 interlocked_increment_i32(volatile int32* data)
+//returns resulting incremented value after performing locked increment(for int32 value)
+FORCEDINLINE int32 interlocked_increment_i32(volatile int32* data)
 {
 	return _InterlockedIncrement((volatile long*)data);
 }
@@ -629,7 +629,7 @@ FORCEDINLINE int64 interlocked_decrement_i64(volatile int64* data)
 
 #pragma intrinsic(_InterlockedDecrement)
 //returns resulting decremented value after performing locked decrement(for int32 value)
-FORCEDINLINE int64 interlocked_decrement_i32(volatile int32* data)
+FORCEDINLINE int32 interlocked_decrement_i32(volatile int32* data)
 {
 	return _InterlockedDecrement((volatile long*)data);
 }
