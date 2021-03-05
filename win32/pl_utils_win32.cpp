@@ -20,9 +20,9 @@ void pl_close_thread(const ThreadHandle* handle)
 }
 
 
-b32 pl_wait_for_thread(const ThreadHandle* handle, uint32 timeout_in_ms)
+b32 pl_wait_for_thread(ThreadHandle handle, uint32 timeout_in_ms)
 {
-	DWORD result = WaitForSingleObject((HANDLE*)handle, timeout_in_ms);
+	DWORD result = WaitForSingleObject((HANDLE)handle.thread_handle, timeout_in_ms);
 	if (result == WAIT_OBJECT_0)
 	{
 		return FALSE;
