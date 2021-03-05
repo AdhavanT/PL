@@ -164,7 +164,7 @@ ThreadHandle pl_create_thread(ThreadProc proc, void* data);
 void pl_close_thread(const ThreadHandle* handle);
 
 //Waits for thread to finish or timeout. Returns TRUE if wait is timed out, and FALSE if thread is finished
-b32 pl_wait_for_thread(const ThreadHandle* handle, uint32 timeout_in_ms);
+b32 pl_wait_for_thread(ThreadHandle handle, uint32 timeout_in_ms);
 
 //waits for all threads to be released. Returns TRUE if wait is timed out, and FALSE if all threads are finished
 b32 pl_wait_for_all_threads(uint32 no_of_threads, const ThreadHandle* handles, uint32 timeout_in_ms);
