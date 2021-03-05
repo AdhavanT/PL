@@ -652,4 +652,22 @@ FORCEDINLINE int32 interlocked_exchange_i32(volatile int32* data, int32 value)
 	return _InterlockedExchange((volatile long*)data, value);
 }
 
+#ifdef PL_X64
+
+#pragma intrinsic(_InterlockedExchange64)
+//NOTE: Doesn't work on x86 
+//returns previous value after exchanging with new value. Only exchanges if data is equal to 'to_compare_with'
+FORCEDINLINE int64 interlocked_compare_exchange_i64(volatile int64* data, int64 value, int64 to_compare_with)
+{
+	return _InterlockedCompareExchange64((volatile long long*)data, value, to_compare_with);
+}
+#endif
+
+#pragma intrinsic(_InterlockedExchange)
+//returns previous value after exchanging with new value. Only exchanges if data is equal to 'to_compare_with'
+FORCEDINLINE int32 interlocked_compare_exchange_i32(volatile int32* data, int32 value, int32 to_compare_with)
+{
+	return _InterlockedCompareExchange((volatile long*)data, value, to_compare_with);
+}
+
 //---------------------------</ATOMICS>--------------------------------------

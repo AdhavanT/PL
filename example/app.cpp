@@ -4,8 +4,8 @@ void initialize(PL& pl)
 {
 	pl.running = TRUE;
 	pl.initialized = FALSE;
-	void* arena_buffer = pl_arena_buffer_alloc(pl.memory.main_arena.capacity);
-	init_memory_arena(&pl.memory.main_arena, pl.memory.main_arena.capacity, arena_buffer);
+	pl.memory.main_arena.base = pl_arena_buffer_alloc(pl.memory.main_arena.capacity);
+	pl.memory.main_arena.top = 0;
 	PL_initialize_timing(pl.time);
 	PL_initialize_audio_capture(pl.audio.input, &pl.memory.main_arena);
 	PL_initialize_window(pl.window, &pl.memory.main_arena);
@@ -42,7 +42,7 @@ void cleanup(PL& pl)
 {
 	PL_cleanup_window(pl.window, &pl.memory.main_arena);
 	PL_cleanup_audio_capture(pl.audio.input, &pl.memory.main_arena);
-	cleanup_memory_arena(&pl.memory.main_arena);
+	pl_arena_buffer_free(pl.memory.main_arena.base);
 }
 
 inline void draw_rectangle_from_point(uint32 from_x, uint32 from_y, uint32 to_x, uint32 to_y, PL pl, uint8 r, uint8 g, uint8 b)
