@@ -40,8 +40,9 @@ struct CreateThreadData
 static DWORD WINAPI win32_start_thread(__in LPVOID lpParameter)
 {
 	CreateThreadData* new_thread_data = (CreateThreadData*)lpParameter;
-	new_thread_data->func_to_be_executed(new_thread_data->data);
+	CreateThreadData new_thread_d = *new_thread_data;	//pushing thread data onto stack and freeing the CreateThreadData that was passed to this. 
 	pl_buffer_free(new_thread_data);
+	new_thread_d.func_to_be_executed(new_thread_d.data);
 	return 0;
 }
 
