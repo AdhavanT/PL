@@ -22,12 +22,28 @@ void pl_close_thread(const ThreadHandle* handle)
 
 b32 pl_wait_for_thread(const ThreadHandle* handle, uint32 timeout_in_ms)
 {
-	return WaitForSingleObject((HANDLE*)handle, timeout_in_ms);
+	DWORD result = WaitForSingleObject((HANDLE*)handle, timeout_in_ms);
+	if (result == WAIT_OBJECT_0)
+	{
+		return FALSE;
+	}
+	else
+	{
+		return TRUE;
+	}
 }
 
 b32 pl_wait_for_all_threads(uint32 no_of_threads, const ThreadHandle* handles, uint32 timeout_in_ms)
 {
-	return WaitForMultipleObjects(no_of_threads, (HANDLE*)handles, TRUE, timeout_in_ms);
+	DWORD result = WaitForMultipleObjects(no_of_threads, (HANDLE*)handles, TRUE, timeout_in_ms);
+	if (result == WAIT_OBJECT_0)
+	{
+		return FALSE;
+	}
+	else
+	{
+		return TRUE;
+	}
 }
 
 
