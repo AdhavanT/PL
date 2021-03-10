@@ -39,12 +39,25 @@ struct ArenaOwnerStack
 	FORCEDINLINE void pop_node(ArenaOwnerNode* new_node)
 	{
 #ifdef ARENA_MONITOR_CHECK_FOR_POPS
-		if (front[length - 1].type_name != new_node->type_name || front[length - 1].size != new_node->size)
+		if (front[length - 1].type_name != new_node->type_name )
 		{
 			ERRORBOX("Incorrect Arena pop occured! Trying to pop Node that isn't at top of stack.");
 		}
+		if(front[length - 1].size < new_node->size)
+		{
+			ERRORBOX("Incorrect Arena pop occured! Trying to pop Node that isn't at top of stack.");
+
+		}
 #endif
-		length--;
+		if (front[length - 1].size > new_node->size)
+		{
+			front[length - 1].size -= new_node->size;	//cutting off some of the top node.
+		}
+		else
+		{
+			ASSERT(front[length - 1].size == new_node->size);
+			length--;	//removing the top node entirely. Happens if top node size == new_node size
+		}
 		if (length < 0)
 		{
 			ERRORBOX("Arena Lock Stack underflowed! More arena pops than pushes...")
