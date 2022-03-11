@@ -11,3 +11,7 @@
 - Threading - creating and controlling threads along with atomic "interlocked" operations.
 - Basic File I/O - Loading from file, creating and loading into file, etc.
 - Memory - OS calls for handling, requesting and operating on memory.
+
+##Demo
+![Demo](Demo/demo.gif)
+(Green is Left audio channel, Blue is right audio channel)
